@@ -25,24 +25,30 @@ A simulated data center fabric connecting up to 512 GPUs through Arista leaf and
 ### Interactive Features
 
 - **GPU count selector** — Switch between 64, 128, 256, and 512 GPUs
-- **Hover any GPU** — Path tracing lights up the full route through the fabric
-- **Hover a leaf switch** — Tooltip shows aggregate GPU stats
-- **Click a GPU** — Detail modal with utilization sparkline history
-- **Click a spine** — Toggle link failure; traffic reroutes to surviving spines
+- **Click any element to toggle failure** — Click a spine, leaf, GPU, or spine-leaf link to shut it down. Click again to bring it back up.
+  - Failed spines/leaves turn red with "DOWN" label
+  - Failed GPUs turn red; orphaned GPUs (whose leaf is down) pulse with a red ring
+  - Traffic reroutes to surviving paths; stats reflect reduced capacity
+- **Hover any GPU** — Detail modal with status, utilization, temperature, memory, power, job assignment, leaf switch, and a sparkline showing utilization history
+- **Hover a GPU** — Path tracing lights up the full route through the fabric (GPU → leaf → spines → all other leaves)
+- **Hover a leaf switch** — Tooltip shows aggregate GPU stats (utilization, temperature, state counts)
 - **Hover a spine-leaf link** — ECMP flow count label
 - **Drag switches** — Reposition spine and leaf nodes; links follow
 - **Pause/Play** — Spacebar or button; freeze the simulation while keeping interaction
 - **Speed slider** — 0.1x to 5x simulation speed
-- **Phase info panel** — Browse all phases with ◀ ▶ buttons; pin to prevent auto-switching
+- **Load slider** — 0-100% network load; controls GPU utilization, particle density, throughput, and temperatures
+- **Phase info panel** — Browse all phases with ◀ ▶ buttons; pin to stop auto-switching and force the simulation into that phase
 
 ### Visual Features
 
 - Continuous GPU utilization heatmap (blue → cyan → green → yellow → red)
 - Multi-job coloring — 2-3 training jobs shown as colored rings per GPU group
-- Live throughput waveform strip showing compute/all-reduce heartbeat
-- Micro-burst congestion flashes on spine links
+- Live throughput waveform strip showing compute/all-reduce heartbeat over time
+- Micro-burst congestion flashes on spine links (more frequent during all-reduce)
 - Pulsing links during peak load and all-reduce
-- Particles react to GPU state (idle = slow/dim, peak = fast/bright)
+- Particles react to GPU state and load level (idle = slow/dim, peak = fast/bright)
+- Rack/rail bounding boxes grouping GPUs by leaf switch
+- Failed elements shown in red with dashed links
 
 ## Running Locally
 
@@ -54,4 +60,4 @@ open index.html
 
 ## Tech
 
-Single self-contained HTML file (~2400 lines). Canvas 2D rendering with offscreen sprite caching and batched draw calls. No frameworks, no build step, no external dependencies beyond Google Fonts.
+Single self-contained HTML file. Canvas 2D rendering with offscreen sprite caching and batched draw calls for performance at 512 GPUs. No frameworks, no build step, no external dependencies beyond Google Fonts.
