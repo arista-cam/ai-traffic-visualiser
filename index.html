@@ -1,0 +1,2438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Network Fabric Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0e17;
+    color: #c8d6e5;
+    font-family: 'Inter', 'JetBrains Mono', monospace;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  /* Stats Panel - Top Left */
+  #stats-panel {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    background: rgba(10, 14, 23, 0.85);
+    border: 1px solid rgba(100, 180, 255, 0.15);
+    border-radius: 8px;
+    padding: 18px 22px;
+    min-width: 220px;
+    backdrop-filter: blur(12px);
+    z-index: 10;
+  }
+
+  #stats-panel .panel-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  #stats-panel .panel-title .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00e676;
+    box-shadow: 0 0 8px #00e676;
+    animation: pulse-dot 2s ease-in-out infinite;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+
+  #stats-panel .panel-title .dot.paused {
+    background: #ffd740;
+    box-shadow: 0 0 8px #ffd740;
+    animation: none;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  #stats-panel .panel-title span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #e0e8f0;
+  }
+
+  #stats-panel .panel-subtitle {
+    font-size: 11px;
+    color: #5a7a9a;
+    margin-bottom: 14px;
+    font-family: 'Inter', sans-serif;
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(100, 180, 255, 0.06);
+  }
+
+  .stat-row:last-child { border-bottom: none; }
+
+  .stat-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #5a7a9a;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .stat-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: #e0e8f0;
+  }
+
+  .stat-value.highlight-green { color: #00e676; }
+  .stat-value.highlight-cyan { color: #4dd0e1; }
+  .stat-value.highlight-yellow { color: #ffd740; }
+  .stat-value .unit {
+    font-size: 10px;
+    font-weight: 400;
+    color: #5a7a9a;
+    margin-left: 2px;
+  }
+
+  /* Legend */
+  #legend {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(100, 180, 255, 0.1);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 11px;
+    color: #7a9ab5;
+    font-family: 'Inter', sans-serif;
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Title - Top Right */
+  #title-panel {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    text-align: right;
+    z-index: 10;
+  }
+
+  #title-panel .main-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 28px;
+    font-weight: 700;
+    color: #e0e8f0;
+    letter-spacing: 3px;
+    text-shadow: 0 0 20px rgba(100, 180, 255, 0.3);
+  }
+
+  #title-panel .sub-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #5a7a9a;
+    letter-spacing: 2px;
+    margin-top: 4px;
+  }
+
+  #title-panel .status-line {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  #title-panel .status-line .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #00e676;
+    box-shadow: 0 0 6px #00e676;
+  }
+
+  #title-panel .status-line span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #00e676;
+    letter-spacing: 1.5px;
+  }
+
+  /* Phase Info Panel */
+  #phase-info {
+    position: fixed;
+    top: 110px;
+    right: 24px;
+    width: 280px;
+    background: rgba(10, 14, 23, 0.82);
+    border: 1px solid rgba(100, 180, 255, 0.12);
+    border-radius: 6px;
+    padding: 12px 14px;
+    backdrop-filter: blur(12px);
+    z-index: 10;
+    transition: opacity 0.4s, border-color 0.4s;
+  }
+
+  #phase-info .phase-heading {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    transition: color 0.4s;
+  }
+
+  #phase-info .phase-desc {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #7a9ab5;
+  }
+
+  #phase-info .phase-detail {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(100, 180, 255, 0.08);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #5a7a9a;
+    letter-spacing: 0.5px;
+  }
+
+  .phase-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(100, 180, 255, 0.08);
+  }
+
+  .phase-nav-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    background: none;
+    border: 1px solid rgba(100, 180, 255, 0.15);
+    border-radius: 4px;
+    color: #5a7a9a;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .phase-nav-btn:hover {
+    color: #e0e8f0;
+    border-color: rgba(100, 180, 255, 0.4);
+    background: rgba(100, 180, 255, 0.08);
+  }
+
+  .phase-nav-btn.pinned {
+    color: #ffd740;
+    border-color: rgba(255, 215, 64, 0.3);
+  }
+
+  .phase-nav-counter {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #5a7a9a;
+    letter-spacing: 1px;
+  }
+
+  /* Bottom Bar */
+  #bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 44px;
+    background: rgba(10, 14, 23, 0.9);
+    border-top: 1px solid rgba(100, 180, 255, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    z-index: 10;
+    backdrop-filter: blur(12px);
+  }
+
+  .bar-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  .bar-item .bar-icon {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bar-item .bar-label {
+    color: #5a7a9a;
+    text-transform: uppercase;
+  }
+
+  .bar-item .bar-value {
+    color: #e0e8f0;
+    font-weight: 600;
+  }
+
+  .bar-item .bar-value.cyan { color: #4dd0e1; }
+  .bar-item .bar-value.green { color: #00e676; }
+
+  .bar-separator {
+    width: 1px;
+    height: 20px;
+    background: rgba(100, 180, 255, 0.12);
+  }
+
+  /* Pause Button */
+  .bar-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border: 1px solid rgba(100, 180, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(100, 180, 255, 0.05);
+    color: #00e676;
+    cursor: pointer;
+    transition: all 0.25s;
+    letter-spacing: 1px;
+  }
+
+  .bar-btn:hover {
+    background: rgba(100, 180, 255, 0.12);
+    border-color: rgba(100, 180, 255, 0.35);
+  }
+
+  .bar-btn.paused {
+    color: #ffd740;
+    border-color: rgba(255, 215, 64, 0.3);
+  }
+
+  /* Speed Slider */
+  #speed-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 80px;
+    height: 4px;
+    background: rgba(100, 180, 255, 0.15);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  #speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #4dd0e1;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 0 6px rgba(77, 208, 225, 0.4);
+  }
+
+  #speed-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #4dd0e1;
+    border: none;
+    cursor: pointer;
+  }
+
+  /* Selector Panels */
+  #gpu-selector, #mode-selector {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(10, 14, 23, 0.85);
+    border: 1px solid rgba(100, 180, 255, 0.15);
+    border-radius: 8px;
+    padding: 8px 14px;
+    backdrop-filter: blur(12px);
+    z-index: 10;
+  }
+
+  #gpu-selector {
+    top: 24px;
+  }
+
+  #mode-selector {
+    top: 68px;
+    gap: 12px;
+  }
+
+  #gpu-selector label, #mode-selector label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #5a7a9a;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-right: 4px;
+  }
+
+  .mode-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .gpu-btn, .mode-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border: 1px solid rgba(100, 180, 255, 0.2);
+    border-radius: 5px;
+    background: rgba(100, 180, 255, 0.05);
+    color: #7a9ab5;
+    cursor: pointer;
+    transition: all 0.25s;
+  }
+
+  .mode-btn {
+    font-size: 10px;
+    padding: 5px 10px;
+    letter-spacing: 0.5px;
+  }
+
+  .gpu-btn:hover, .mode-btn:hover {
+    background: rgba(100, 180, 255, 0.12);
+    border-color: rgba(100, 180, 255, 0.35);
+    color: #e0e8f0;
+  }
+
+  .gpu-btn.active, .mode-btn.active {
+    background: rgba(100, 180, 255, 0.18);
+    border-color: rgba(100, 180, 255, 0.5);
+    color: #4dd0e1;
+    box-shadow: 0 0 12px rgba(77, 208, 225, 0.15);
+  }
+
+  /* GPU Detail Modal */
+  #gpu-modal {
+    display: none;
+    position: fixed;
+    z-index: 20;
+    background: rgba(10, 14, 23, 0.92);
+    border: 1px solid rgba(100, 180, 255, 0.2);
+    border-radius: 6px;
+    padding: 12px 14px;
+    width: 200px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  }
+
+  #gpu-modal .modal-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: #e0e8f0;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+
+  #gpu-modal .modal-close {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: #5a7a9a;
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  #gpu-modal .modal-close:hover { color: #e0e8f0; }
+
+  #gpu-modal .stat-row {
+    padding: 3px 0;
+  }
+
+  #gpu-modal .stat-label {
+    font-size: 9px;
+  }
+
+  #gpu-modal .stat-value {
+    font-size: 11px;
+  }
+
+  #gpu-modal .stat-value .unit {
+    font-size: 8px;
+  }
+
+  #sparkline-wrap {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(100, 180, 255, 0.08);
+  }
+
+  #sparkline-wrap .stat-label {
+    margin-bottom: 4px;
+    display: block;
+    font-size: 9px;
+  }
+
+  /* Tier labels */
+  .tier-label {
+    position: fixed;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: rgba(100, 180, 255, 0.15);
+    text-transform: uppercase;
+    z-index: 5;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<!-- Stats Panel -->
+<div id="stats-panel">
+  <div class="panel-title">
+    <div class="dot" id="live-dot"></div>
+    <span id="live-label">NETWORK LIVE</span>
+  </div>
+  <div class="panel-subtitle" id="panel-subtitle">Arista High-Speed Fabric</div>
+
+  <div class="stat-row">
+    <span class="stat-label">Total Throughput</span>
+    <span class="stat-value" id="stat-throughput">0<span class="unit">Tbps</span></span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">AVG GPU Util</span>
+    <span class="stat-value highlight-cyan" id="stat-gpu-util">0<span class="unit">%</span></span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">AVG Temp</span>
+    <span class="stat-value highlight-yellow" id="stat-temp">0<span class="unit">&deg;C</span></span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Sync Rate</span>
+    <span class="stat-value highlight-green" id="stat-sync">0<span class="unit">%</span></span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Active Links</span>
+    <span class="stat-value" id="stat-links">0</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Packets/Sec</span>
+    <span class="stat-value" id="stat-packets">0<span class="unit">k</span></span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Phase</span>
+    <span class="stat-value highlight-green" id="stat-phase" style="font-size:11px">—</span>
+  </div>
+
+  <div id="legend">
+    <div class="legend-item" style="margin-bottom:4px">
+      <div style="width:80px;height:8px;border-radius:4px;background:linear-gradient(to right,rgb(30,80,140),rgb(30,208,220),rgb(60,230,80),rgb(255,215,20),rgb(255,40,0));flex-shrink:0"></div>
+      <span style="font-size:9px;color:#5a7a9a">0%&nbsp;&nbsp;&nbsp;&nbsp;GPU Util&nbsp;&nbsp;&nbsp;&nbsp;100%</span>
+    </div>
+    <div class="legend-item"><div class="legend-dot" style="background:#4dd0e1;box-shadow:0 0 4px #4dd0e1"></div>Job A / Arista Link</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e040fb;box-shadow:0 0 4px #e040fb"></div>Job B</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ffab40;box-shadow:0 0 4px #ffab40"></div>Job C</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f44336;box-shadow:0 0 4px #f44336"></div>Failed / Straggler</div>
+    <div class="legend-item"><div class="legend-dot" style="background:rgba(255,60,40,0.6);box-shadow:0 0 4px rgba(255,60,40,0.6)"></div>Congestion</div>
+  </div>
+</div>
+
+<!-- Title -->
+<div id="title-panel">
+  <div class="main-title" id="title-gpu-count">128 GPU Cluster</div>
+  <div class="sub-title" id="sub-title">ARISTA 400GbE &middot; FAT-TREE</div>
+  <div class="status-line" id="status-line">
+    <div class="dot"></div>
+    <span id="status-text">ALL SYSTEMS SYNCHRONIZED</span>
+  </div>
+</div>
+
+<!-- Phase Info -->
+<div id="phase-info">
+  <div class="phase-heading" id="phase-heading">TRAINING · COMPUTE</div>
+  <div class="phase-desc" id="phase-desc">GPUs perform forward and backward passes on the model. Each GPU processes its shard of the training batch independently.</div>
+  <div class="phase-detail" id="phase-detail">Traffic: GPU ← data from leaf switches · Spine fabric idle</div>
+  <div class="phase-nav">
+    <button class="phase-nav-btn" id="phase-prev" title="Previous phase">◀</button>
+    <span class="phase-nav-counter" id="phase-counter">1 / 5</span>
+    <button class="phase-nav-btn" id="phase-pin" title="Pin to stop auto-switching">📌 AUTO</button>
+    <button class="phase-nav-btn" id="phase-next" title="Next phase">▶</button>
+  </div>
+</div>
+
+<!-- GPU Selector -->
+<div id="gpu-selector">
+  <label>GPUs</label>
+  <button class="gpu-btn" data-count="64">64</button>
+  <button class="gpu-btn active" data-count="128">128</button>
+  <button class="gpu-btn" data-count="256">256</button>
+  <button class="gpu-btn" data-count="512">512</button>
+</div>
+
+<!-- Mode Selector -->
+<div id="mode-selector">
+  <div class="mode-group">
+    <label>Workload</label>
+    <button class="mode-btn active" data-workload="training">Training</button>
+    <button class="mode-btn" data-workload="inference">Inference</button>
+  </div>
+  <div class="mode-group">
+    <label>Topology</label>
+    <button class="mode-btn active" data-topo="fat-tree">Fat-Tree</button>
+    <button class="mode-btn" data-topo="rail-optimized">Rail-Opt</button>
+  </div>
+</div>
+
+<!-- Bottom Bar -->
+<div id="bottom-bar">
+  <button class="bar-btn" id="pause-btn" title="Space to toggle">&#9654; LIVE</button>
+  <div class="bar-item">
+    <span class="bar-label">Speed</span>
+    <input type="range" id="speed-slider" min="0.1" max="5" step="0.1" value="1">
+    <span class="bar-value cyan" id="speed-value">1.0x</span>
+  </div>
+  <div class="bar-separator"></div>
+  <div class="bar-item">
+    <svg class="bar-icon" viewBox="0 0 16 16" fill="none">
+      <rect x="2" y="2" width="12" height="12" rx="2" stroke="#4dd0e1" stroke-width="1.2"/>
+      <circle cx="8" cy="8" r="3" fill="#4dd0e1"/>
+    </svg>
+    <span class="bar-label">Arista Network Fabric</span>
+  </div>
+  <div class="bar-item">
+    <span class="bar-label">GPUs</span>
+    <span class="bar-value cyan" id="bar-gpus">128</span>
+  </div>
+  <div class="bar-item">
+    <span class="bar-label">Leaf Switches</span>
+    <span class="bar-value" id="bar-leaves">8</span>
+  </div>
+  <div class="bar-item">
+    <span class="bar-label">Spine Switches</span>
+    <span class="bar-value" id="bar-spines">2</span>
+  </div>
+  <div class="bar-item">
+    <span class="bar-label">Throughput</span>
+    <span class="bar-value cyan" id="bar-throughput">0 Tbps</span>
+  </div>
+  <div class="bar-item">
+    <span class="bar-label">Sync</span>
+    <span class="bar-value green" id="bar-sync">0%</span>
+  </div>
+  <div class="bar-item">
+    <span class="bar-label">AVG Util</span>
+    <span class="bar-value cyan" id="bar-util">0%</span>
+  </div>
+</div>
+
+<!-- GPU Detail Modal -->
+<div id="gpu-modal">
+  <button class="modal-close">&times;</button>
+  <div class="modal-title" id="modal-title">GPU-001</div>
+  <div id="modal-body"></div>
+  <div id="sparkline-wrap">
+    <span class="stat-label">Utilization History</span>
+    <canvas id="sparkline-canvas" width="170" height="30" style="width:170px;height:30px;display:block"></canvas>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Configuration
+// ============================================================
+const CONFIG = {
+  gpuCounts: [64, 128, 256, 512],
+  gpusPerLeaf: 16,
+  colors: {
+    bg: '#0a0e17',
+    spine: '#4dd0e1',
+    leaf: '#4dd0e1',
+    linkSpineLeaf: 'rgba(77, 208, 225, 0.18)',
+    linkLeafGpu: 'rgba(255, 215, 64, 0.12)',
+    gpuActive: '#ffd740',
+    gpuPeak: '#ff6e40',
+    gpuSyncing: '#00e676',
+    gpuIdle: '#546e7a',
+    particleSpine: '#4dd0e1',
+    particleLeaf: '#80deea',
+    particleGpu: '#ffd740',
+    failed: '#f44336',
+  },
+  particleDensity: 0.4,
+  particleSpeed: { min: 0.003, max: 0.012 },
+};
+
+// ============================================================
+// State
+// ============================================================
+let gpuCount = 128;
+let topology = null;
+let particles = [];
+let animId = null;
+let stats = {
+  throughput: 0, gpuUtil: 0, temp: 0,
+  sync: 0, links: 0, packets: 0,
+};
+let targetStats = {};
+let dpr = window.devicePixelRatio || 1;
+
+// New state
+let paused = false;
+let speedMultiplier = 1.0;
+let hoverState = { node: null, link: null };
+let dragState = { node: null, offsetX: 0, offsetY: 0, isDragging: false, startX: 0, startY: 0 };
+let failedSpines = new Set();
+let workloadMode = 'training';
+let topoMode = 'fat-tree';
+let trainingPhase = 'compute';
+let trainingPhaseTimer = 0;
+const TRAINING_COMPUTE_DURATION = 8000;
+const TRAINING_ALLREDUCE_DURATION = 5000;
+
+// Sparkline history
+const SPARKLINE_HISTORY_LEN = 60;
+let gpuUtilHistory = {};
+let historyWriteIdx = 0;
+let historyTimer = 0;
+
+// Offscreen canvas sprite cache
+let nodeSpriteCaches = {};
+
+// Throughput waveform history
+const WAVEFORM_LEN = 200;
+let waveformData = new Float32Array(WAVEFORM_LEN);
+let waveformIdx = 0;
+let waveformTimer = 0;
+
+// Congestion events
+let congestionEvents = []; // { link, startTime, duration, intensity }
+let congestionTimer = 0;
+
+// ECMP flow counts per spine-leaf link
+let ecmpFlows = {}; // link index -> flow count
+
+// Multi-job coloring
+const JOB_COLORS = ['#4dd0e1', '#e040fb', '#ffab40']; // cyan, magenta, amber
+const JOB_NAMES = ['Job A', 'Job B', 'Job C'];
+let gpuJobAssignments = []; // gpu index -> job index (0, 1, 2)
+
+// Tail latency straggler
+let straggler = null; // { gpuIdx, startTime, duration }
+let stragglerCooldown = 0;
+
+// Checkpoint pause
+let checkpointState = 'none'; // 'none' | 'saving' | 'resuming'
+let checkpointTimer = 0;
+let checkpointCooldown = 0;
+const CHECKPOINT_INTERVAL = 25000;
+const CHECKPOINT_SAVE_DURATION = 2000;
+const CHECKPOINT_RESUME_DURATION = 800;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// ============================================================
+// Offscreen Canvas Sprite Cache
+// ============================================================
+function clearSpriteCache() {
+  nodeSpriteCaches = {};
+}
+
+function getOrCreateSprite(key, w, h, drawFn) {
+  if (!nodeSpriteCaches[key]) {
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = Math.ceil(w * dpr);
+    offCanvas.height = Math.ceil(h * dpr);
+    const offCtx = offCanvas.getContext('2d');
+    offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawFn(offCtx, w / 2, h / 2);
+    nodeSpriteCaches[key] = offCanvas;
+  }
+  return nodeSpriteCaches[key];
+}
+
+// ============================================================
+// Topology Builder
+// ============================================================
+function buildTopology(count) {
+  const leafCount = Math.ceil(count / CONFIG.gpusPerLeaf);
+  const spineCount = leafCount <= 8 ? 2 : leafCount <= 16 ? 4 : 8;
+
+  const w = canvas.width / dpr;
+  const h = canvas.height / dpr;
+
+  const bottomBarH = 44;
+  const topPad = 110;
+  const usableH = h - bottomBarH - topPad;
+
+  const spineTierY = topPad + usableH * 0.08;
+  const leafTierY = topPad + usableH * 0.38;
+  const gpuTierTopY = topPad + usableH * 0.62;
+  const gpuTierBotY = topPad + usableH * 0.82;
+
+  const sidePad = 60;
+  const usableW = w - sidePad * 2;
+
+  const spines = [];
+  for (let i = 0; i < spineCount; i++) {
+    const x = sidePad + usableW * (i + 0.5) / spineCount;
+    spines.push({ id: `spine-${i}`, type: 'spine', x, y: spineTierY, label: 'SPINE' });
+  }
+
+  const leaves = [];
+  for (let i = 0; i < leafCount; i++) {
+    const x = sidePad + usableW * (i + 0.5) / leafCount;
+    leaves.push({ id: `leaf-${i}`, type: 'leaf', x, y: leafTierY, label: `L${i}`, gpus: [] });
+  }
+
+  const gpus = [];
+  const gpuStates = ['active', 'active', 'active', 'active', 'active', 'peak', 'syncing', 'idle'];
+  const gpusTop = Math.ceil(count / 2);
+  const gpusBot = count - gpusTop;
+
+  for (let i = 0; i < count; i++) {
+    const isTop = i < gpusTop;
+    const rowCount = isTop ? gpusTop : gpusBot;
+    const rowIndex = isTop ? i : i - gpusTop;
+    const tierY = isTop ? gpuTierTopY : gpuTierBotY;
+    const x = sidePad + usableW * (rowIndex + 0.5) / rowCount;
+
+    let leafIdx;
+    if (topoMode === 'rail-optimized') {
+      leafIdx = i % leafCount;
+    } else {
+      leafIdx = Math.floor(i / CONFIG.gpusPerLeaf) % leafCount;
+    }
+
+    const state = gpuStates[Math.floor(Math.random() * gpuStates.length)];
+
+    const gpu = {
+      id: `gpu-${i}`,
+      type: 'gpu',
+      x, y: tierY,
+      state,
+      leafIdx,
+      row: isTop ? 0 : 1,
+      temp: 60 + Math.random() * 25,
+      util: 30 + Math.random() * 65,
+      mem: 40 + Math.random() * 55,
+      power: 200 + Math.random() * 200,
+    };
+    gpus.push(gpu);
+    leaves[leafIdx].gpus.push(gpu);
+  }
+
+  const spineLeafLinks = [];
+  for (const s of spines) {
+    for (const l of leaves) {
+      spineLeafLinks.push({ from: s, to: l, type: 'spine-leaf' });
+    }
+  }
+
+  const leafGpuLinks = [];
+  for (const gpu of gpus) {
+    leafGpuLinks.push({ from: leaves[gpu.leafIdx], to: gpu, type: 'leaf-gpu' });
+  }
+
+  // Init sparkline history
+  gpuUtilHistory = {};
+  historyWriteIdx = 0;
+  for (const gpu of gpus) {
+    gpuUtilHistory[gpu.id] = new Float32Array(SPARKLINE_HISTORY_LEN);
+  }
+
+  // Assign GPUs to jobs (contiguous blocks)
+  const jobCount = count <= 64 ? 2 : 3;
+  const gpusPerJob = Math.floor(count / jobCount);
+  gpuJobAssignments = [];
+  for (let i = 0; i < count; i++) {
+    const job = Math.min(Math.floor(i / gpusPerJob), jobCount - 1);
+    gpuJobAssignments.push(job);
+    gpus[i].job = job;
+  }
+
+  return {
+    spines, leaves, gpus,
+    spineLeafLinks, leafGpuLinks,
+    allLinks: [...spineLeafLinks, ...leafGpuLinks],
+    spineCount, leafCount,
+    tierYs: { spine: spineTierY, leaf: leafTierY, gpuTop: gpuTierTopY, gpuBot: gpuTierBotY },
+  };
+}
+
+// ============================================================
+// Particle System
+// ============================================================
+function initParticles() {
+  particles = [];
+  if (!topology) return;
+
+  const isTraining = workloadMode === 'training';
+  // Scale down particle density at high GPU counts
+  const scale = gpuCount <= 128 ? 1.0 : gpuCount <= 256 ? 0.5 : 0.25;
+
+  // Spine-leaf (east-west fabric traffic)
+  for (const link of topology.spineLeafLinks) {
+    if (failedSpines.has(link.from.id)) continue;
+    const count = Math.max(1, Math.round((isTraining ? 5 : 1) * scale));
+    for (let i = 0; i < count; i++) {
+      particles.push(createParticle(link));
+    }
+  }
+
+  // Leaf-GPU (vertical traffic to/from GPUs)
+  for (const link of topology.leafGpuLinks) {
+    const gpu = link.to;
+    if (isTraining) {
+      if (Math.random() < scale) particles.push(createParticle(link));
+      if (Math.random() < 0.4 * scale) particles.push(createParticle(link));
+    } else {
+      if (gpu.state === 'idle') {
+        if (Math.random() < 0.1 * scale) particles.push(createParticle(link));
+      } else {
+        if (Math.random() < 0.5 * scale) particles.push(createParticle(link));
+      }
+    }
+  }
+}
+
+function createParticle(link) {
+  const speed = CONFIG.particleSpeed.min + Math.random() * (CONFIG.particleSpeed.max - CONFIG.particleSpeed.min);
+  const dir = Math.random() > 0.5 ? 1 : -1;
+
+  let color = CONFIG.colors.particleSpine;
+  let size = 2.2;
+  if (link.type === 'leaf-gpu') {
+    const gpu = link.to;
+    color = utilToHeatColor(gpu.util);
+    size = 1.6;
+  }
+
+  return {
+    link,
+    t: Math.random(),
+    speed: speed * dir,
+    size,
+    color,
+  };
+}
+
+function updateParticles() {
+  const sm = speedMultiplier;
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+
+    if (p.link.type === 'spine-leaf' && failedSpines.has(p.link.from.id)) {
+      particles.splice(i, 1);
+      continue;
+    }
+
+    if (p.link.type === 'leaf-gpu') {
+      const gpu = p.link.to;
+      p.color = utilToHeatColor(gpu.util);
+
+      if (gpu.state === 'idle') {
+        p.speed = Math.sign(p.speed) * 0.001;
+        p.size = 0.8;
+      } else if (gpu.state === 'peak') {
+        const absSpd = Math.abs(p.speed);
+        if (absSpd < CONFIG.particleSpeed.max * 1.5) {
+          p.speed = Math.sign(p.speed) * Math.min(absSpd * 1.02, CONFIG.particleSpeed.max * 1.5);
+        }
+        p.size = 2.0;
+      } else {
+        p.size = 1.6;
+      }
+    }
+
+    p.t += p.speed * sm;
+    if (p.t > 1) p.t -= 1;
+    if (p.t < 0) p.t += 1;
+  }
+}
+
+// ============================================================
+// GPU State Simulation
+// ============================================================
+let stateTimer = 0;
+
+const PHASE_INFO = {
+  'training-compute': {
+    heading: 'TRAINING · COMPUTE',
+    color: '#ffd740',
+    desc: 'GPUs perform forward and backward passes on the model. Each GPU processes its shard of the training batch independently.',
+    detail: 'Traffic: data flows leaf → GPU · Spine fabric relatively quiet',
+  },
+  'training-allreduce': {
+    heading: 'TRAINING · ALL-REDUCE',
+    color: '#00e676',
+    desc: 'GPUs synchronise gradients across the cluster. Every GPU exchanges data with every other GPU through the spine fabric — this is the most network-intensive phase.',
+    detail: 'Traffic: heavy GPU ↔ GPU via spine · All links saturated',
+  },
+  'training-straggler': {
+    heading: 'TRAINING · STRAGGLER',
+    color: '#f44336',
+    desc: 'One GPU is taking much longer than the rest. All other GPUs must wait — all-reduce cannot complete until every GPU has finished. This is the #1 killer of training throughput at scale.',
+    detail: 'Traffic: cluster stalled · All GPUs idle except straggler',
+  },
+  'training-checkpoint': {
+    heading: 'TRAINING · CHECKPOINT',
+    color: '#ffc107',
+    desc: 'Saving model weights and optimizer state to persistent storage. All GPUs pause computation to write a consistent snapshot — if a node fails, training resumes from the last checkpoint.',
+    detail: 'Traffic: GPU → storage (write) · Compute paused',
+  },
+  'inference': {
+    heading: 'INFERENCE · SERVING',
+    color: '#4dd0e1',
+    desc: 'GPUs serve requests independently. Incoming queries are routed to available GPUs, processed, and returned. No GPU-to-GPU coordination is needed.',
+    detail: 'Traffic: client → leaf → GPU (north-south) · Spine mostly idle',
+  },
+};
+
+const PHASE_KEYS = Object.keys(PHASE_INFO);
+let currentPhaseIdx = 0;
+let phaseInfoPinned = false;
+
+function showPhaseByIndex(idx) {
+  currentPhaseIdx = ((idx % PHASE_KEYS.length) + PHASE_KEYS.length) % PHASE_KEYS.length;
+  const key = PHASE_KEYS[currentPhaseIdx];
+  const info = PHASE_INFO[key];
+  document.getElementById('phase-heading').textContent = info.heading;
+  document.getElementById('phase-heading').style.color = info.color;
+  document.getElementById('phase-desc').textContent = info.desc;
+  document.getElementById('phase-detail').textContent = info.detail;
+  document.getElementById('phase-info').style.borderColor = hexToRgba(info.color, 0.2);
+  document.getElementById('phase-counter').textContent = `${currentPhaseIdx + 1} / ${PHASE_KEYS.length}`;
+}
+
+function updatePhaseInfo(key) {
+  if (phaseInfoPinned) return;
+  const idx = PHASE_KEYS.indexOf(key);
+  if (idx >= 0) showPhaseByIndex(idx);
+}
+
+function updateGpuStates(dt) {
+  stateTimer += dt;
+
+  if (workloadMode === 'training') {
+    updateTrainingMode(dt);
+  } else {
+    updateInferenceMode(dt);
+  }
+}
+
+function updateTrainingMode(dt) {
+  trainingPhaseTimer += dt * speedMultiplier;
+
+  const phaseDuration = trainingPhase === 'compute' ? TRAINING_COMPUTE_DURATION : TRAINING_ALLREDUCE_DURATION;
+
+  if (trainingPhaseTimer >= phaseDuration) {
+    trainingPhaseTimer = 0;
+    trainingPhase = trainingPhase === 'compute' ? 'allreduce' : 'compute';
+
+    if (!topology) return;
+
+    if (trainingPhase === 'compute') {
+      for (const gpu of topology.gpus) {
+        gpu.state = Math.random() < 0.7 ? 'active' : 'peak';
+        gpu.util = 75 + Math.random() * 25;
+        gpu.temp = 70 + Math.random() * 18;
+      }
+      drainSpineParticles();
+      document.getElementById('status-text').textContent = 'COMPUTE IN PROGRESS';
+      document.getElementById('stat-phase').textContent = 'COMPUTE';
+      document.getElementById('stat-phase').style.color = '#ffd740';
+      updatePhaseInfo('training-compute');
+    } else {
+      for (const gpu of topology.gpus) {
+        gpu.state = 'syncing';
+        gpu.util = 40 + Math.random() * 30;
+        gpu.temp = 65 + Math.random() * 12;
+      }
+      floodSpineParticles();
+      document.getElementById('status-text').textContent = 'ALL-REDUCE IN PROGRESS';
+      document.getElementById('stat-phase').textContent = 'ALL-REDUCE';
+      document.getElementById('stat-phase').style.color = '#00e676';
+      updatePhaseInfo('training-allreduce');
+    }
+  }
+
+  if (stateTimer < 2000) return;
+  stateTimer = 0;
+  if (!topology) return;
+
+  for (const gpu of topology.gpus) {
+    if (Math.random() < 0.03) {
+      if (trainingPhase === 'compute') {
+        gpu.state = Math.random() < 0.5 ? 'active' : 'peak';
+        gpu.util = 75 + Math.random() * 25;
+      }
+    }
+  }
+}
+
+function updateStraggler(dt) {
+  if (workloadMode !== 'training') { straggler = null; return; }
+  if (!topology) return;
+
+  stragglerCooldown -= dt * speedMultiplier;
+
+  if (straggler) {
+    const elapsed = performance.now() - straggler.startTime;
+    if (elapsed >= straggler.duration) {
+      // Straggler done — release the cluster
+      const sg = topology.gpus[straggler.gpuIdx];
+      sg.state = 'syncing';
+      sg.util = 50 + Math.random() * 20;
+      straggler = null;
+      stragglerCooldown = 15000 + Math.random() * 20000;
+      document.getElementById('status-text').textContent =
+        trainingPhase === 'allreduce' ? 'ALL-REDUCE IN PROGRESS' : 'COMPUTE IN PROGRESS';
+    }
+    return;
+  }
+
+  // Chance to spawn a straggler during all-reduce
+  if (trainingPhase === 'allreduce' && stragglerCooldown <= 0 && Math.random() < 0.002) {
+    const idx = Math.floor(Math.random() * topology.gpus.length);
+    const gpu = topology.gpus[idx];
+    gpu.state = 'peak';
+    gpu.util = 98;
+    gpu.temp = 88 + Math.random() * 7;
+    // Dim all other GPUs to show they're waiting
+    for (let i = 0; i < topology.gpus.length; i++) {
+      if (i === idx) continue;
+      topology.gpus[i].util = 5 + Math.random() * 10;
+      topology.gpus[i].state = 'idle';
+    }
+    clearSpriteCache();
+    straggler = {
+      gpuIdx: idx,
+      startTime: performance.now(),
+      duration: 3000 + Math.random() * 3000,
+    };
+    document.getElementById('status-text').textContent = 'STRAGGLER DETECTED — CLUSTER WAITING';
+    updatePhaseInfo('training-straggler');
+  }
+}
+
+function updateCheckpoint(dt) {
+  if (workloadMode !== 'training') { checkpointState = 'none'; return; }
+
+  checkpointCooldown -= dt * speedMultiplier;
+
+  if (checkpointState === 'saving') {
+    checkpointTimer += dt * speedMultiplier;
+    if (checkpointTimer >= CHECKPOINT_SAVE_DURATION) {
+      checkpointState = 'resuming';
+      checkpointTimer = 0;
+      // Restore GPUs
+      if (topology) {
+        for (const gpu of topology.gpus) {
+          gpu.state = Math.random() < 0.7 ? 'active' : 'peak';
+          gpu.util = 70 + Math.random() * 30;
+        }
+      }
+      document.getElementById('status-text').textContent = 'RESUMING FROM CHECKPOINT';
+      updatePhaseInfo('training-compute');
+    }
+    return;
+  }
+
+  if (checkpointState === 'resuming') {
+    checkpointTimer += dt * speedMultiplier;
+    if (checkpointTimer >= CHECKPOINT_RESUME_DURATION) {
+      checkpointState = 'none';
+      checkpointTimer = 0;
+      checkpointCooldown = CHECKPOINT_INTERVAL;
+      document.getElementById('status-text').textContent = 'COMPUTE IN PROGRESS';
+    }
+    return;
+  }
+
+  // Trigger checkpoint
+  if (checkpointCooldown <= 0 && trainingPhase === 'compute' && !straggler) {
+    checkpointState = 'saving';
+    checkpointTimer = 0;
+    checkpointCooldown = CHECKPOINT_INTERVAL;
+    // Freeze all GPUs
+    if (topology) {
+      for (const gpu of topology.gpus) {
+        gpu.state = 'idle';
+        gpu.util = 5 + Math.random() * 10;
+      }
+    }
+    drainSpineParticles();
+    document.getElementById('status-text').textContent = 'CHECKPOINT — SAVING MODEL STATE';
+    updatePhaseInfo('training-checkpoint');
+  }
+}
+
+function updateInferenceMode(dt) {
+  if (stateTimer < 2000) return;
+  stateTimer = 0;
+  if (!topology) return;
+
+  trainingPhase = '';
+  document.getElementById('status-text').textContent = 'SERVING REQUESTS';
+  document.getElementById('stat-phase').textContent = 'INFERENCE';
+  document.getElementById('stat-phase').style.color = '#4dd0e1';
+  updatePhaseInfo('inference');
+
+  const states = ['active', 'active', 'idle', 'idle', 'active', 'peak', 'idle'];
+  for (const gpu of topology.gpus) {
+    if (Math.random() < 0.12) {
+      gpu.state = states[Math.floor(Math.random() * states.length)];
+      gpu.util = gpu.state === 'idle' ? 5 + Math.random() * 15
+        : gpu.state === 'peak' ? 80 + Math.random() * 20
+        : 30 + Math.random() * 40;
+      gpu.temp = gpu.state === 'idle' ? 42 + Math.random() * 10
+        : gpu.state === 'peak' ? 72 + Math.random() * 15
+        : 55 + Math.random() * 15;
+    }
+  }
+}
+
+function floodSpineParticles() {
+  if (!topology) return;
+  const perLink = gpuCount <= 128 ? 10 : gpuCount <= 256 ? 5 : 3;
+  for (const link of topology.spineLeafLinks) {
+    if (failedSpines.has(link.from.id)) continue;
+    for (let i = 0; i < perLink; i++) {
+      const p = createParticle(link);
+      p.color = CONFIG.colors.gpuSyncing;
+      p.size = 2.8;
+      p.speed = Math.sign(p.speed) * (CONFIG.particleSpeed.max * (1.2 + Math.random() * 0.8));
+      particles.push(p);
+    }
+  }
+}
+
+function drainSpineParticles() {
+  // Remove the excess spine particles when leaving all-reduce
+  let removed = 0;
+  for (let i = particles.length - 1; i >= 0 && removed < topology.spineLeafLinks.length * 8; i--) {
+    if (particles[i].link.type === 'spine-leaf') {
+      particles.splice(i, 1);
+      removed++;
+    }
+  }
+}
+
+// ============================================================
+// Sparkline History
+// ============================================================
+function recordHistory(dt) {
+  historyTimer += dt;
+  if (historyTimer < 2000 || !topology) return;
+  historyTimer = 0;
+
+  const idx = historyWriteIdx % SPARKLINE_HISTORY_LEN;
+  for (const gpu of topology.gpus) {
+    if (gpuUtilHistory[gpu.id]) {
+      gpuUtilHistory[gpu.id][idx] = gpu.util;
+    }
+  }
+  historyWriteIdx++;
+}
+
+// ============================================================
+// Stats Simulation
+// ============================================================
+function updateStats(dt) {
+  const count = gpuCount;
+  const leafCount = topology ? topology.leafCount : 8;
+  const spineCount = topology ? topology.spineCount : 2;
+  const healthySpines = spineCount - failedSpines.size;
+  const totalLinks = healthySpines * leafCount + count;
+
+  const isTraining = workloadMode === 'training';
+  const utilBase = isTraining ? 85 : 48;
+  const utilSwing = isTraining ? 8 : 12;
+  const tempBase = isTraining ? 74 : 58;
+
+  targetStats = {
+    throughput: (count * (isTraining ? 26.2 : 15.8) * (healthySpines / spineCount) + Math.sin(Date.now() / 5000) * count * 2).toFixed(1),
+    gpuUtil: (utilBase + Math.sin(Date.now() / 3000) * utilSwing).toFixed(1),
+    temp: (tempBase + Math.sin(Date.now() / 7000) * 5).toFixed(1),
+    sync: isTraining ? (99 + Math.random() * 0.9).toFixed(2) : (95 + Math.random() * 4).toFixed(2),
+    links: totalLinks,
+    packets: (count * (isTraining ? 1.9 : 1.1) * (healthySpines / spineCount) + Math.sin(Date.now() / 4000) * count * 0.3).toFixed(1),
+  };
+
+  const lerp = 0.05;
+  stats.throughput += (parseFloat(targetStats.throughput) - stats.throughput) * lerp;
+  stats.gpuUtil += (parseFloat(targetStats.gpuUtil) - stats.gpuUtil) * lerp;
+  stats.temp += (parseFloat(targetStats.temp) - stats.temp) * lerp;
+  stats.sync += (parseFloat(targetStats.sync) - stats.sync) * lerp;
+  stats.links += (targetStats.links - stats.links) * lerp;
+  stats.packets += (parseFloat(targetStats.packets) - stats.packets) * lerp;
+}
+
+function renderStats() {
+  document.getElementById('stat-throughput').innerHTML = `${stats.throughput.toFixed(1)}<span class="unit">Tbps</span>`;
+  document.getElementById('stat-gpu-util').innerHTML = `${stats.gpuUtil.toFixed(1)}<span class="unit">%</span>`;
+  document.getElementById('stat-temp').innerHTML = `${stats.temp.toFixed(1)}<span class="unit">&deg;C</span>`;
+  document.getElementById('stat-sync').innerHTML = `${stats.sync.toFixed(2)}<span class="unit">%</span>`;
+  document.getElementById('stat-links').textContent = Math.round(stats.links);
+  document.getElementById('stat-packets').innerHTML = `${stats.packets.toFixed(1)}<span class="unit">k</span>`;
+
+  document.getElementById('bar-throughput').textContent = `${stats.throughput.toFixed(1)} Tbps`;
+  document.getElementById('bar-sync').textContent = `${stats.sync.toFixed(2)}%`;
+  document.getElementById('bar-util').textContent = `${stats.gpuUtil.toFixed(1)}%`;
+}
+
+// ============================================================
+// Canvas Rendering
+// ============================================================
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  clearSpriteCache();
+}
+
+function getGpuColor(state) {
+  switch (state) {
+    case 'active': return CONFIG.colors.gpuActive;
+    case 'peak': return CONFIG.colors.gpuPeak;
+    case 'syncing': return CONFIG.colors.gpuSyncing;
+    case 'idle': return CONFIG.colors.gpuIdle;
+    default: return CONFIG.colors.gpuActive;
+  }
+}
+
+function utilToHeatColor(util) {
+  const t = Math.max(0, Math.min(100, util)) / 100;
+  let r, g, b;
+  if (t < 0.25) {
+    const s = t / 0.25;
+    r = 30; g = 80 + s * 128; b = 140 + s * 80;
+  } else if (t < 0.5) {
+    const s = (t - 0.25) / 0.25;
+    r = 30 + s * 30; g = 208 + s * 22; b = 220 - s * 140;
+  } else if (t < 0.75) {
+    const s = (t - 0.5) / 0.25;
+    r = 60 + s * 195; g = 230 - s * 15; b = 80 - s * 60;
+  } else {
+    const s = (t - 0.75) / 0.25;
+    r = 255; g = 215 - s * 175; b = 20 - s * 20;
+  }
+  const ri = Math.round(r), gi = Math.round(g), bi = Math.round(b);
+  return '#' + ((1 << 24) | (ri << 16) | (gi << 8) | bi).toString(16).slice(1);
+}
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function drawBackground() {
+  ctx.fillStyle = CONFIG.colors.bg;
+  ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+
+  const grd = ctx.createRadialGradient(
+    canvas.width / dpr / 2, canvas.height / dpr * 0.35, 0,
+    canvas.width / dpr / 2, canvas.height / dpr * 0.35, canvas.width / dpr * 0.6
+  );
+  grd.addColorStop(0, 'rgba(30, 60, 90, 0.08)');
+  grd.addColorStop(1, 'rgba(10, 14, 23, 0)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+}
+
+function drawLeafGroups() {
+  if (!topology || gpuCount > 256) return;
+  for (const leaf of topology.leaves) {
+    if (leaf.gpus.length === 0) continue;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const gpu of leaf.gpus) {
+      minX = Math.min(minX, gpu.x);
+      maxX = Math.max(maxX, gpu.x);
+      minY = Math.min(minY, gpu.y);
+      maxY = Math.max(maxY, gpu.y);
+    }
+    const pad = 14;
+    const rx = minX - pad, ry = minY - pad;
+    const rw = maxX - minX + pad * 2, rh = maxY - minY + pad * 2;
+
+    ctx.strokeStyle = 'rgba(77, 208, 225, 0.06)';
+    ctx.fillStyle = 'rgba(77, 208, 225, 0.012)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.roundRect(rx, ry, rw, rh, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    const labelText = topoMode === 'rail-optimized' ? `Rail ${leaf.label}` : `Rack ${leaf.label}`;
+    ctx.font = "500 9px 'JetBrains Mono', monospace";
+    ctx.fillStyle = 'rgba(77, 208, 225, 0.15)';
+    ctx.textAlign = 'left';
+    ctx.fillText(labelText, rx + 4, ry - 3);
+  }
+}
+
+function drawLinks() {
+  if (!topology) return;
+
+  // Pre-compute peak ratio per leaf (avoid .filter() per link)
+  const isAllReduce = workloadMode === 'training' && trainingPhase === 'allreduce';
+  const now = Date.now();
+
+  // Batch normal spine-leaf links into one path
+  const normalLinks = [];
+  const failedLinks = [];
+  const pulsingLinks = [];
+  let hoveredLink = null;
+
+  for (const link of topology.spineLeafLinks) {
+    if (failedSpines.has(link.from.id)) { failedLinks.push(link); continue; }
+    if (hoverState.link === link) { hoveredLink = link; continue; }
+
+    const leaf = link.to;
+    let peakCount = 0;
+    for (const g of leaf.gpus) if (g.state === 'peak') peakCount++;
+    const peakRatio = leaf.gpus.length > 0 ? peakCount / leaf.gpus.length : 0;
+
+    if (isAllReduce || peakRatio > 0.5) { pulsingLinks.push(link); }
+    else { normalLinks.push(link); }
+  }
+
+  // Draw normal links as single batch
+  if (normalLinks.length) {
+    ctx.strokeStyle = CONFIG.colors.linkSpineLeaf;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (const link of normalLinks) {
+      ctx.moveTo(link.from.x, link.from.y);
+      ctx.lineTo(link.to.x, link.to.y);
+    }
+    ctx.stroke();
+  }
+
+  // Failed links batch
+  if (failedLinks.length) {
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = hexToRgba(CONFIG.colors.failed, 0.25);
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (const link of failedLinks) {
+      ctx.moveTo(link.from.x, link.from.y);
+      ctx.lineTo(link.to.x, link.to.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Pulsing links
+  if (pulsingLinks.length) {
+    const pulse = 0.5 + 0.5 * Math.sin(now / (isAllReduce ? 200 : 300));
+    if (isAllReduce) {
+      ctx.lineWidth = 1.5 + pulse * 2.5;
+      ctx.strokeStyle = `rgba(0, 230, 118, ${0.3 + pulse * 0.35})`;
+    } else {
+      ctx.lineWidth = 0.8 + pulse * 2;
+      ctx.strokeStyle = `rgba(255, 110, 64, ${0.15 + pulse * 0.25})`;
+    }
+    ctx.beginPath();
+    for (const link of pulsingLinks) {
+      ctx.moveTo(link.from.x, link.from.y);
+      ctx.lineTo(link.to.x, link.to.y);
+    }
+    ctx.stroke();
+  }
+
+  // Hovered link (single, drawn last on top)
+  if (hoveredLink) {
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = hexToRgba(CONFIG.colors.spine, 0.6);
+    ctx.beginPath();
+    ctx.moveTo(hoveredLink.from.x, hoveredLink.from.y);
+    ctx.lineTo(hoveredLink.to.x, hoveredLink.to.y);
+    ctx.stroke();
+  }
+
+  // Batch leaf-GPU links by color bucket (5% steps)
+  ctx.lineWidth = 0.5;
+  const linkBuckets = {};
+  for (const link of topology.leafGpuLinks) {
+    const bucket = Math.round(link.to.util / 5) * 5;
+    if (!linkBuckets[bucket]) linkBuckets[bucket] = [];
+    linkBuckets[bucket].push(link);
+  }
+  for (const bucket in linkBuckets) {
+    ctx.strokeStyle = hexToRgba(utilToHeatColor(parseInt(bucket)), 0.15);
+    ctx.beginPath();
+    for (const link of linkBuckets[bucket]) {
+      ctx.moveTo(link.from.x, link.from.y);
+      ctx.lineTo(link.to.x, link.to.y);
+    }
+    ctx.stroke();
+  }
+}
+
+function drawParticles() {
+  const groups = {};
+  for (const p of particles) {
+    const x = p.link.from.x + (p.link.to.x - p.link.from.x) * p.t;
+    const y = p.link.from.y + (p.link.to.y - p.link.from.y) * p.t;
+    const key = p.color + '|' + p.size.toFixed(1);
+    if (!groups[key]) groups[key] = { color: p.color, size: p.size, coords: [] };
+    groups[key].coords.push(x, y);
+  }
+
+  for (const g of Object.values(groups)) {
+    ctx.fillStyle = g.color;
+    ctx.shadowColor = g.color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    for (let i = 0; i < g.coords.length; i += 2) {
+      ctx.moveTo(g.coords[i] + g.size, g.coords[i + 1]);
+      ctx.arc(g.coords[i], g.coords[i + 1], g.size, 0, Math.PI * 2);
+    }
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+}
+
+function drawSwitchNodeDirect(c, cx, cy, radius, color, label, isFailed) {
+  const glowGrd = c.createRadialGradient(cx, cy, radius * 0.5, cx, cy, radius + 10);
+  glowGrd.addColorStop(0, hexToRgba(color, 0.09));
+  glowGrd.addColorStop(1, 'transparent');
+  c.fillStyle = glowGrd;
+  c.beginPath();
+  c.arc(cx, cy, radius + 6, 0, Math.PI * 2);
+  c.fill();
+
+  c.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 2;
+    const px = cx + radius * Math.cos(angle);
+    const py = cy + radius * Math.sin(angle);
+    if (i === 0) c.moveTo(px, py);
+    else c.lineTo(px, py);
+  }
+  c.closePath();
+  c.fillStyle = 'rgba(10, 14, 23, 0.85)';
+  c.fill();
+  c.strokeStyle = color;
+  c.lineWidth = 1.5;
+  c.stroke();
+
+  if (isFailed) {
+    c.font = `700 ${radius > 18 ? 10 : 8}px 'JetBrains Mono', monospace`;
+    c.fillStyle = CONFIG.colors.failed;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText('FAIL', cx, cy);
+  } else if (label) {
+    c.font = `600 ${radius > 18 ? 10 : 8}px 'JetBrains Mono', monospace`;
+    c.fillStyle = color;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(label, cx, cy);
+  }
+}
+
+function drawSwitchNode(node, radius, color, label) {
+  const isFailed = node.type === 'spine' && failedSpines.has(node.id);
+  const drawColor = isFailed ? CONFIG.colors.failed : color;
+
+  const spriteSize = (radius + 16) * 2;
+  const key = `sw-${radius}-${drawColor}-${isFailed ? 1 : 0}`;
+
+  const sprite = getOrCreateSprite(key, spriteSize, spriteSize, (c, cx, cy) => {
+    drawSwitchNodeDirect(c, cx, cy, radius, drawColor, isFailed ? 'FAIL' : label, isFailed);
+  });
+  ctx.drawImage(sprite, node.x - spriteSize / 2, node.y - spriteSize / 2, spriteSize, spriteSize);
+}
+
+function drawGpuNodeDirect(c, cx, cy, r, color) {
+  const glowGrd = c.createRadialGradient(cx, cy, r * 0.3, cx, cy, r + 6);
+  glowGrd.addColorStop(0, hexToRgba(color, 0.19));
+  glowGrd.addColorStop(1, 'transparent');
+  c.fillStyle = glowGrd;
+  c.beginPath();
+  c.arc(cx, cy, r + 3, 0, Math.PI * 2);
+  c.fill();
+
+  c.beginPath();
+  c.arc(cx, cy, r, 0, Math.PI * 2);
+  c.fillStyle = 'rgba(10, 14, 23, 0.7)';
+  c.fill();
+  c.strokeStyle = color;
+  c.lineWidth = 1.2;
+  c.stroke();
+
+  c.beginPath();
+  c.arc(cx, cy, r * 0.35, 0, Math.PI * 2);
+  c.fillStyle = color;
+  c.fill();
+}
+
+function drawGpuNode(gpu) {
+  const heatColor = utilToHeatColor(gpu.util);
+  const r = gpuCount > 256 ? 4 : gpuCount > 128 ? 5 : 7;
+
+  // Quantise color to reduce sprite variants (bucket to nearest 5%)
+  const bucket = Math.round(gpu.util / 5) * 5;
+  const bucketColor = utilToHeatColor(bucket);
+  const spriteSize = (r + 12) * 2;
+  const key = `gpu-${r}-${bucket}`;
+
+  const sprite = getOrCreateSprite(key, spriteSize, spriteSize, (c, cx, cy) => {
+    drawGpuNodeDirect(c, cx, cy, r, bucketColor);
+  });
+  ctx.drawImage(sprite, gpu.x - spriteSize / 2, gpu.y - spriteSize / 2, spriteSize, spriteSize);
+}
+
+function drawNodes() {
+  if (!topology) return;
+
+  for (const s of topology.spines) {
+    const r = gpuCount > 256 ? 22 : 28;
+    drawSwitchNode(s, r, CONFIG.colors.spine, 'SPINE');
+  }
+
+  for (const l of topology.leaves) {
+    const r = gpuCount > 256 ? 14 : gpuCount > 128 ? 16 : 18;
+    drawSwitchNode(l, r, CONFIG.colors.leaf, l.label);
+  }
+
+  for (const gpu of topology.gpus) {
+    drawGpuNode(gpu);
+  }
+
+  // Job color rings batched per job (training mode only)
+  if (workloadMode === 'training') {
+    const r = gpuCount > 256 ? 4 : gpuCount > 128 ? 5 : 7;
+    const ringR = r + 2;
+    ctx.lineWidth = 0.8;
+    for (let j = 0; j < JOB_COLORS.length; j++) {
+      ctx.strokeStyle = hexToRgba(JOB_COLORS[j], 0.4);
+      ctx.beginPath();
+      for (const gpu of topology.gpus) {
+        if (gpu.job !== j) continue;
+        ctx.moveTo(gpu.x + ringR, gpu.y);
+        ctx.arc(gpu.x, gpu.y, ringR, 0, Math.PI * 2);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // Straggler highlight
+  if (straggler && topology.gpus[straggler.gpuIdx]) {
+    const sg = topology.gpus[straggler.gpuIdx];
+    const r = gpuCount > 256 ? 4 : gpuCount > 128 ? 5 : 7;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 150);
+    ctx.beginPath();
+    ctx.arc(sg.x, sg.y, r + 6 + pulse * 4, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(244, 67, 54, ${0.5 + pulse * 0.4})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Label
+    ctx.font = "700 8px 'JetBrains Mono', monospace";
+    ctx.fillStyle = '#f44336';
+    ctx.textAlign = 'center';
+    ctx.fillText('STRAGGLER', sg.x, sg.y - r - 10);
+  }
+
+  // Checkpoint overlay
+  if (checkpointState === 'saving') {
+    const progress = checkpointTimer / CHECKPOINT_SAVE_DURATION;
+    const alpha = 0.08 + Math.sin(progress * Math.PI) * 0.06;
+    ctx.fillStyle = `rgba(255, 193, 7, ${alpha})`;
+    ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+  }
+
+  // Draw hover highlight as a direct overlay
+  if (hoverState.node) {
+    const n = hoverState.node;
+    if (n.type === 'spine' || n.type === 'leaf') {
+      const r = n.type === 'spine'
+        ? (gpuCount > 256 ? 22 : 28)
+        : (gpuCount > 256 ? 14 : gpuCount > 128 ? 16 : 18);
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    } else if (n.type === 'gpu') {
+      const r = gpuCount > 256 ? 4 : gpuCount > 128 ? 5 : 7;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+}
+
+function drawTierLabels() {
+  if (!topology) return;
+  ctx.font = "600 11px 'JetBrains Mono', monospace";
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.12)';
+  ctx.textAlign = 'center';
+
+  const cx = canvas.width / dpr / 2;
+  ctx.fillText('SPINE TIER', cx, topology.tierYs.spine - 30);
+  ctx.fillText('LEAF TIER', cx, topology.tierYs.leaf - 22);
+  ctx.fillText('GPU COMPUTE TIER', cx, topology.tierYs.gpuTop - 22);
+}
+
+function drawLeafTooltip() {
+  if (!hoverState.node || hoverState.node.type !== 'leaf') return;
+  const leaf = hoverState.node;
+  if (leaf.gpus.length === 0) return;
+
+  const avgUtil = leaf.gpus.reduce((s, g) => s + g.util, 0) / leaf.gpus.length;
+  const avgTemp = leaf.gpus.reduce((s, g) => s + g.temp, 0) / leaf.gpus.length;
+  const counts = { active: 0, peak: 0, syncing: 0, idle: 0 };
+  for (const g of leaf.gpus) counts[g.state]++;
+
+  const hasFailedSpine = topology.spines.some(s => failedSpines.has(s.id));
+
+  const lines = [
+    `${leaf.label} — ${leaf.gpus.length} GPUs`,
+    `Util ${avgUtil.toFixed(0)}% · Temp ${avgTemp.toFixed(0)}°C`,
+    `A:${counts.active} P:${counts.peak} S:${counts.syncing} I:${counts.idle}`,
+  ];
+  if (hasFailedSpine) lines.push('⚠ Spine failure');
+
+  const lineH = 14;
+  const pad = 8;
+  const boxW = 190;
+  const boxH = lines.length * lineH + pad * 2;
+
+  let bx = leaf.x - boxW / 2;
+  let by = leaf.y - boxH - 24;
+  const w = canvas.width / dpr;
+  if (bx < 10) bx = 10;
+  if (bx + boxW > w - 10) bx = w - 10 - boxW;
+  if (by < 10) by = leaf.y + 30;
+
+  ctx.fillStyle = 'rgba(10, 14, 23, 0.92)';
+  ctx.strokeStyle = 'rgba(77, 208, 225, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(bx, by, boxW, boxH, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.font = "500 9px 'JetBrains Mono', monospace";
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillStyle = i === 0 ? '#4dd0e1' : (lines[i].includes('⚠') ? '#f44336' : '#a0b8cc');
+    ctx.fillText(lines[i], bx + pad, by + pad + i * lineH);
+  }
+}
+
+// ============================================================
+// Path Tracing (GPU hover shows full path through fabric)
+// ============================================================
+function drawPathTrace() {
+  if (!hoverState.node || hoverState.node.type !== 'gpu' || !topology) return;
+  const gpu = hoverState.node;
+  const leaf = topology.leaves[gpu.leafIdx];
+
+  // Highlight GPU → Leaf link
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(gpu.x, gpu.y);
+  ctx.lineTo(leaf.x, leaf.y);
+  ctx.stroke();
+
+  // Highlight Leaf → all healthy Spines
+  for (const spine of topology.spines) {
+    if (failedSpines.has(spine.id)) continue;
+    ctx.strokeStyle = 'rgba(77, 208, 225, 0.35)';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(leaf.x, leaf.y);
+    ctx.lineTo(spine.x, spine.y);
+    ctx.stroke();
+
+    // Spine → all other leaves
+    for (const otherLeaf of topology.leaves) {
+      if (otherLeaf === leaf) continue;
+      ctx.strokeStyle = 'rgba(77, 208, 225, 0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(spine.x, spine.y);
+      ctx.lineTo(otherLeaf.x, otherLeaf.y);
+      ctx.stroke();
+    }
+  }
+
+  // Glow on the source leaf
+  ctx.beginPath();
+  ctx.arc(leaf.x, leaf.y, 24, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+// ============================================================
+// Live Throughput Waveform
+// ============================================================
+function updateWaveform(dt) {
+  waveformTimer += dt;
+  if (waveformTimer < 200) return;
+  waveformTimer = 0;
+  waveformData[waveformIdx % WAVEFORM_LEN] = stats.throughput;
+  waveformIdx++;
+}
+
+function drawWaveform() {
+  const w = canvas.width / dpr;
+  const barY = canvas.height / dpr - 44;
+  const waveH = 30;
+  const waveY = barY - waveH - 4;
+  const waveW = w * 0.5;
+  const waveX = (w - waveW) / 2;
+
+  const samples = Math.min(waveformIdx, WAVEFORM_LEN);
+  if (samples < 3) return;
+
+  // Find max for scaling
+  let maxVal = 1;
+  for (let i = 0; i < samples; i++) {
+    const idx = (waveformIdx - samples + i + WAVEFORM_LEN) % WAVEFORM_LEN;
+    if (waveformData[idx] > maxVal) maxVal = waveformData[idx];
+  }
+
+  // Background
+  ctx.fillStyle = 'rgba(10, 14, 23, 0.6)';
+  ctx.beginPath();
+  ctx.roundRect(waveX - 6, waveY - 4, waveW + 12, waveH + 8, 4);
+  ctx.fill();
+
+  // Label
+  ctx.font = "500 8px 'JetBrains Mono', monospace";
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.3)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('THROUGHPUT', waveX, waveY - 2);
+
+  // Line
+  ctx.strokeStyle = '#4dd0e1';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for (let i = 0; i < samples; i++) {
+    const idx = (waveformIdx - samples + i + WAVEFORM_LEN) % WAVEFORM_LEN;
+    const val = waveformData[idx];
+    const x = waveX + (i / (samples - 1)) * waveW;
+    const y = waveY + waveH - (val / maxVal) * (waveH - 6);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Fill under curve
+  const lastX = waveX + waveW;
+  ctx.lineTo(lastX, waveY + waveH);
+  ctx.lineTo(waveX, waveY + waveH);
+  ctx.closePath();
+  const grd = ctx.createLinearGradient(0, waveY, 0, waveY + waveH);
+  grd.addColorStop(0, 'rgba(77, 208, 225, 0.12)');
+  grd.addColorStop(1, 'rgba(77, 208, 225, 0)');
+  ctx.fillStyle = grd;
+  ctx.fill();
+}
+
+// ============================================================
+// Micro-burst Congestion Events
+// ============================================================
+function updateCongestion(dt) {
+  congestionTimer += dt;
+
+  // Spawn new congestion events randomly
+  if (congestionTimer > 800 && topology && !paused) {
+    congestionTimer = 0;
+    // Higher chance during training all-reduce
+    const chance = (workloadMode === 'training' && trainingPhase === 'allreduce') ? 0.15 : 0.03;
+    for (let i = 0; i < topology.spineLeafLinks.length; i++) {
+      const link = topology.spineLeafLinks[i];
+      if (failedSpines.has(link.from.id)) continue;
+      if (Math.random() < chance) {
+        congestionEvents.push({
+          link,
+          startTime: performance.now(),
+          duration: 600 + Math.random() * 1200,
+          intensity: 0.4 + Math.random() * 0.6,
+        });
+      }
+    }
+  }
+
+  // Clean up expired events
+  const now = performance.now();
+  congestionEvents = congestionEvents.filter(e => now - e.startTime < e.duration);
+}
+
+function drawCongestionOverlay() {
+  const now = performance.now();
+  for (const evt of congestionEvents) {
+    const elapsed = now - evt.startTime;
+    const progress = elapsed / evt.duration;
+    // Flash in then fade out
+    const alpha = progress < 0.3
+      ? (progress / 0.3) * evt.intensity
+      : evt.intensity * (1 - (progress - 0.3) / 0.7);
+
+    if (alpha <= 0) continue;
+
+    const link = evt.link;
+    ctx.strokeStyle = `rgba(255, 60, 40, ${alpha * 0.6})`;
+    ctx.lineWidth = 2 + alpha * 3;
+    ctx.beginPath();
+    ctx.moveTo(link.from.x, link.from.y);
+    ctx.lineTo(link.to.x, link.to.y);
+    ctx.stroke();
+
+    // Congestion "hotspot" glow at midpoint
+    const mx = (link.from.x + link.to.x) / 2;
+    const my = (link.from.y + link.to.y) / 2;
+    const glowGrd = ctx.createRadialGradient(mx, my, 0, mx, my, 15);
+    glowGrd.addColorStop(0, `rgba(255, 60, 40, ${alpha * 0.3})`);
+    glowGrd.addColorStop(1, 'transparent');
+    ctx.fillStyle = glowGrd;
+    ctx.beginPath();
+    ctx.arc(mx, my, 15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ============================================================
+// ECMP Flow Distribution
+// ============================================================
+function computeEcmpFlows() {
+  if (!topology) return;
+  ecmpFlows = {};
+  const healthySpines = topology.spines.filter(s => !failedSpines.has(s.id));
+  if (healthySpines.length === 0) return;
+
+  const totalGpus = topology.gpus.length;
+  const flowsPerSpine = Math.ceil((totalGpus * topology.leafCount) / healthySpines.length);
+
+  for (let i = 0; i < topology.spineLeafLinks.length; i++) {
+    const link = topology.spineLeafLinks[i];
+    if (failedSpines.has(link.from.id)) {
+      ecmpFlows[i] = 0;
+    } else {
+      const jitter = Math.floor(Math.random() * 6) - 3;
+      ecmpFlows[i] = Math.max(0, flowsPerSpine + jitter);
+    }
+  }
+}
+
+function drawEcmpLabel() {
+  if (!hoverState.link || hoverState.link.type !== 'spine-leaf') return;
+  if (!topology) return;
+
+  const link = hoverState.link;
+  const linkIdx = topology.spineLeafLinks.indexOf(link);
+  if (linkIdx < 0) return;
+
+  const flows = ecmpFlows[linkIdx] || 0;
+  const isFailed = failedSpines.has(link.from.id);
+
+  const mx = (link.from.x + link.to.x) / 2;
+  const my = (link.from.y + link.to.y) / 2;
+
+  const text = isFailed ? '0 flows (DOWN)' : `${flows} flows`;
+  const textW = ctx.measureText ? 80 : 70;
+
+  ctx.fillStyle = 'rgba(10, 14, 23, 0.9)';
+  ctx.strokeStyle = isFailed ? 'rgba(244, 67, 54, 0.4)' : 'rgba(77, 208, 225, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(mx - textW / 2, my - 18, textW, 20, 4);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.font = "600 9px 'JetBrains Mono', monospace";
+  ctx.fillStyle = isFailed ? '#f44336' : '#4dd0e1';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, mx, my - 8);
+}
+
+// ============================================================
+// Main Loop
+// ============================================================
+let lastTime = 0;
+function animate(time) {
+  const dt = time - lastTime;
+  lastTime = time;
+
+  drawBackground();
+  drawLeafGroups();
+  drawLinks();
+  drawCongestionOverlay();
+  drawPathTrace();
+  drawParticles();
+  drawNodes();
+  drawTierLabels();
+  drawLeafTooltip();
+  drawEcmpLabel();
+  drawWaveform();
+
+  if (!paused) {
+    updateParticles();
+    updateGpuStates(dt);
+    updateStraggler(dt);
+    updateCheckpoint(dt);
+    updateStats(dt);
+    updateCongestion(dt);
+    updateWaveform(dt);
+    renderStats();
+    recordHistory(dt);
+  } else {
+    renderStats();
+  }
+
+  animId = requestAnimationFrame(animate);
+}
+
+// ============================================================
+// Interaction: Hit Detection
+// ============================================================
+function findHoveredNode(mx, my) {
+  if (!topology) return null;
+
+  for (const s of topology.spines) {
+    const r = gpuCount > 256 ? 22 : 28;
+    const dx = mx - s.x, dy = my - s.y;
+    if (dx * dx + dy * dy < (r + 4) * (r + 4)) return s;
+  }
+
+  for (const l of topology.leaves) {
+    const r = gpuCount > 256 ? 14 : gpuCount > 128 ? 16 : 18;
+    const dx = mx - l.x, dy = my - l.y;
+    if (dx * dx + dy * dy < (r + 4) * (r + 4)) return l;
+  }
+
+  const hitR = gpuCount > 256 ? 8 : gpuCount > 128 ? 10 : 14;
+  for (const gpu of topology.gpus) {
+    const dx = mx - gpu.x, dy = my - gpu.y;
+    if (dx * dx + dy * dy < hitR * hitR) return gpu;
+  }
+
+  return null;
+}
+
+function findHoveredLink(mx, my) {
+  if (!topology) return null;
+  const threshold = 6;
+
+  for (const link of topology.spineLeafLinks) {
+    const ax = link.from.x, ay = link.from.y;
+    const bx = link.to.x, by = link.to.y;
+    const abx = bx - ax, aby = by - ay;
+    const apx = mx - ax, apy = my - ay;
+    const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / (abx * abx + aby * aby)));
+    const closestX = ax + t * abx, closestY = ay + t * aby;
+    const dist = Math.sqrt((mx - closestX) ** 2 + (my - closestY) ** 2);
+    if (dist < threshold) return link;
+  }
+
+  return null;
+}
+
+// ============================================================
+// Interaction: Mouse Events
+// ============================================================
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  if (dragState.isDragging && dragState.node) {
+    dragState.node.x = mx - dragState.offsetX;
+    dragState.node.y = my - dragState.offsetY;
+    canvas.style.cursor = 'grabbing';
+    return;
+  }
+
+  const node = findHoveredNode(mx, my);
+  const link = node ? null : findHoveredLink(mx, my);
+
+  hoverState.node = node;
+  hoverState.link = link;
+
+  canvas.style.cursor = node ? 'pointer' : (link ? 'crosshair' : 'default');
+});
+
+canvas.addEventListener('mouseleave', () => {
+  hoverState.node = null;
+  hoverState.link = null;
+  canvas.style.cursor = 'default';
+});
+
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const node = findHoveredNode(mx, my);
+  if (node && (node.type === 'spine' || node.type === 'leaf')) {
+    dragState.node = node;
+    dragState.offsetX = mx - node.x;
+    dragState.offsetY = my - node.y;
+    dragState.startX = mx;
+    dragState.startY = my;
+    dragState.isDragging = true;
+    canvas.style.cursor = 'grabbing';
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (dragState.isDragging && dragState.node) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const dist = Math.sqrt((mx - dragState.startX) ** 2 + (my - dragState.startY) ** 2);
+
+    if (dist < 5) {
+      handleClick(dragState.node, e.clientX, e.clientY);
+    }
+  }
+  dragState.node = null;
+  dragState.isDragging = false;
+});
+
+canvas.addEventListener('click', (e) => {
+  if (dragState.isDragging) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const node = findHoveredNode(mx, my);
+  if (node) {
+    handleClick(node, e.clientX, e.clientY);
+    return;
+  }
+
+  document.getElementById('gpu-modal').style.display = 'none';
+});
+
+function handleClick(node, clientX, clientY) {
+  if (node.type === 'spine') {
+    if (failedSpines.has(node.id)) {
+      failedSpines.delete(node.id);
+    } else {
+      failedSpines.add(node.id);
+    }
+    clearSpriteCache();
+    initParticles();
+    computeEcmpFlows();
+    return;
+  }
+
+  if (node.type === 'gpu') {
+    showGpuModal(node, clientX, clientY);
+  }
+}
+
+function showGpuModal(gpu, mx, my) {
+  const modal = document.getElementById('gpu-modal');
+  const idx = parseInt(gpu.id.split('-')[1]);
+
+  document.getElementById('modal-title').textContent = `GPU-${String(idx).padStart(3, '0')}`;
+
+  const stateColors = {
+    active: '#ffd740', peak: '#ff6e40', syncing: '#00e676', idle: '#546e7a',
+  };
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="stat-row">
+      <span class="stat-label">Status</span>
+      <span class="stat-value" style="color:${stateColors[gpu.state]}">${gpu.state.toUpperCase()}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Utilization</span>
+      <span class="stat-value">${gpu.util.toFixed(1)}<span class="unit">%</span></span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Temperature</span>
+      <span class="stat-value" style="color:${gpu.temp > 80 ? '#ff6e40' : '#ffd740'}">${gpu.temp.toFixed(1)}<span class="unit">&deg;C</span></span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Memory</span>
+      <span class="stat-value">${gpu.mem.toFixed(1)}<span class="unit">%</span></span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Power</span>
+      <span class="stat-value">${gpu.power.toFixed(0)}<span class="unit">W</span></span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Leaf Switch</span>
+      <span class="stat-value" style="color:#4dd0e1">L${gpu.leafIdx}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Job</span>
+      <span class="stat-value" style="color:${JOB_COLORS[gpu.job] || '#4dd0e1'}">${JOB_NAMES[gpu.job] || '—'}</span>
+    </div>
+  `;
+
+  drawSparkline(gpu);
+
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  let left = mx + 12;
+  let top = my - 40;
+  if (left + 210 > w) left = mx - 220;
+  if (top + 220 > h) top = h - 230;
+  if (top < 10) top = 10;
+
+  modal.style.display = 'block';
+  modal.style.left = left + 'px';
+  modal.style.top = top + 'px';
+}
+
+function drawSparkline(gpu) {
+  const sparkCanvas = document.getElementById('sparkline-canvas');
+  const sCtx = sparkCanvas.getContext('2d');
+  const sw = sparkCanvas.width;
+  const sh = sparkCanvas.height;
+
+  sCtx.clearRect(0, 0, sw, sh);
+
+  const history = gpuUtilHistory[gpu.id];
+  if (!history) return;
+
+  const samples = Math.min(historyWriteIdx, SPARKLINE_HISTORY_LEN);
+  if (samples < 2) return;
+
+  sCtx.strokeStyle = '#4dd0e1';
+  sCtx.lineWidth = 1.5;
+  sCtx.beginPath();
+
+  for (let i = 0; i < samples; i++) {
+    const dataIdx = (historyWriteIdx - samples + i + SPARKLINE_HISTORY_LEN) % SPARKLINE_HISTORY_LEN;
+    const val = history[dataIdx];
+    const x = (i / (samples - 1)) * sw;
+    const y = sh - (val / 100) * sh;
+    if (i === 0) sCtx.moveTo(x, y);
+    else sCtx.lineTo(x, y);
+  }
+  sCtx.stroke();
+
+  const grd = sCtx.createLinearGradient(0, 0, 0, sh);
+  grd.addColorStop(0, 'rgba(77, 208, 225, 0.15)');
+  grd.addColorStop(1, 'rgba(77, 208, 225, 0)');
+  sCtx.lineTo(sw, sh);
+  sCtx.lineTo(0, sh);
+  sCtx.closePath();
+  sCtx.fillStyle = grd;
+  sCtx.fill();
+}
+
+document.querySelector('.modal-close').addEventListener('click', () => {
+  document.getElementById('gpu-modal').style.display = 'none';
+});
+
+// ============================================================
+// Interaction: Controls
+// ============================================================
+
+// GPU selector
+document.querySelectorAll('.gpu-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setGpuCount(parseInt(btn.dataset.count));
+  });
+});
+
+// Workload mode
+document.querySelectorAll('[data-workload]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    workloadMode = btn.dataset.workload;
+    document.querySelectorAll('[data-workload]').forEach(b => b.classList.toggle('active', b === btn));
+    trainingPhaseTimer = 0;
+    stateTimer = 0;
+    if (workloadMode === 'inference') {
+      trainingPhase = '';
+      updatePhaseInfo('inference');
+    } else {
+      trainingPhase = 'compute';
+      updatePhaseInfo('training-compute');
+    }
+    initParticles();
+  });
+});
+
+// Topology mode
+document.querySelectorAll('[data-topo]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    topoMode = btn.dataset.topo;
+    document.querySelectorAll('[data-topo]').forEach(b => b.classList.toggle('active', b === btn));
+    document.getElementById('sub-title').textContent =
+      `ARISTA 400GbE · ${topoMode === 'fat-tree' ? 'FAT-TREE' : 'RAIL-OPTIMIZED'}`;
+    rebuildTopology();
+  });
+});
+
+// Pause/Play
+const pauseBtn = document.getElementById('pause-btn');
+function togglePause() {
+  paused = !paused;
+  pauseBtn.innerHTML = paused ? '&#9646;&#9646; PAUSED' : '&#9654; LIVE';
+  pauseBtn.classList.toggle('paused', paused);
+  const dot = document.getElementById('live-dot');
+  const label = document.getElementById('live-label');
+  dot.classList.toggle('paused', paused);
+  label.textContent = paused ? 'PAUSED' : 'NETWORK LIVE';
+}
+pauseBtn.addEventListener('click', togglePause);
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && document.activeElement === document.body) {
+    e.preventDefault();
+    togglePause();
+  }
+});
+
+// Speed slider
+const speedSlider = document.getElementById('speed-slider');
+const speedValue = document.getElementById('speed-value');
+speedSlider.addEventListener('input', () => {
+  speedMultiplier = parseFloat(speedSlider.value);
+  speedValue.textContent = speedMultiplier.toFixed(1) + 'x';
+});
+
+// Phase info nav
+document.getElementById('phase-prev').addEventListener('click', () => {
+  phaseInfoPinned = true;
+  updatePinButton();
+  showPhaseByIndex(currentPhaseIdx - 1);
+});
+document.getElementById('phase-next').addEventListener('click', () => {
+  phaseInfoPinned = true;
+  updatePinButton();
+  showPhaseByIndex(currentPhaseIdx + 1);
+});
+document.getElementById('phase-pin').addEventListener('click', () => {
+  phaseInfoPinned = !phaseInfoPinned;
+  updatePinButton();
+});
+function updatePinButton() {
+  const btn = document.getElementById('phase-pin');
+  btn.textContent = phaseInfoPinned ? '📌 PINNED' : '📌 AUTO';
+  btn.classList.toggle('pinned', phaseInfoPinned);
+}
+
+// ============================================================
+// Setup & Rebuild
+// ============================================================
+function setGpuCount(count) {
+  gpuCount = count;
+
+  document.querySelectorAll('.gpu-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.count) === count);
+  });
+
+  document.getElementById('title-gpu-count').textContent = `${count} GPU Cluster`;
+  document.getElementById('bar-gpus').textContent = count;
+
+  rebuildTopology();
+}
+
+function rebuildTopology() {
+  failedSpines.clear();
+  clearSpriteCache();
+  topology = buildTopology(gpuCount);
+  initParticles();
+  computeEcmpFlows();
+  congestionEvents = [];
+  waveformData = new Float32Array(WAVEFORM_LEN);
+  waveformIdx = 0;
+  straggler = null;
+  stragglerCooldown = 10000;
+  checkpointState = 'none';
+  checkpointTimer = 0;
+  checkpointCooldown = CHECKPOINT_INTERVAL;
+
+  document.getElementById('bar-leaves').textContent = topology.leafCount;
+  document.getElementById('bar-spines').textContent = topology.spineCount;
+
+  stats = {
+    throughput: 0, gpuUtil: 0, temp: 0,
+    sync: 0, links: 0, packets: 0,
+  };
+}
+
+// ============================================================
+// Init
+// ============================================================
+window.addEventListener('resize', () => {
+  resize();
+  if (topology) {
+    rebuildTopology();
+  }
+});
+
+resize();
+setGpuCount(128);
+animate(0);
+</script>
+</body>
+</html>
