@@ -348,8 +348,8 @@
     border-color: rgba(255, 215, 64, 0.3);
   }
 
-  /* Speed Slider */
-  #speed-slider {
+  /* Sliders */
+  #speed-slider, #load-slider {
     -webkit-appearance: none;
     appearance: none;
     width: 80px;
@@ -360,7 +360,7 @@
     cursor: pointer;
   }
 
-  #speed-slider::-webkit-slider-thumb {
+  #speed-slider::-webkit-slider-thumb, #load-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 12px;
@@ -372,7 +372,7 @@
     box-shadow: 0 0 6px rgba(77, 208, 225, 0.4);
   }
 
-  #speed-slider::-moz-range-thumb {
+  #speed-slider::-moz-range-thumb, #load-slider::-moz-range-thumb {
     width: 12px;
     height: 12px;
     border-radius: 50%;
@@ -625,6 +625,11 @@
     <input type="range" id="speed-slider" min="0.1" max="5" step="0.1" value="1">
     <span class="bar-value cyan" id="speed-value">1.0x</span>
   </div>
+  <div class="bar-item">
+    <span class="bar-label">Load</span>
+    <input type="range" id="load-slider" min="0" max="100" step="5" value="75">
+    <span class="bar-value cyan" id="load-value">75%</span>
+  </div>
   <div class="bar-separator"></div>
   <div class="bar-item">
     <svg class="bar-icon" viewBox="0 0 16 16" fill="none">
@@ -712,6 +717,7 @@ let dpr = window.devicePixelRatio || 1;
 // New state
 let paused = false;
 let speedMultiplier = 1.0;
+let loadLevel = 75; // 0-100
 let hoverState = { node: null, link: null };
 let dragState = { node: null, offsetX: 0, offsetY: 0, isDragging: false, startX: 0, startY: 0 };
 let failedSpines = new Set();
@@ -918,8 +924,10 @@ function initParticles() {
   if (!topology) return;
 
   const isTraining = workloadMode === 'training';
-  // Scale down particle density at high GPU counts
-  const scale = gpuCount <= 128 ? 1.0 : gpuCount <= 256 ? 0.5 : 0.25;
+  // Scale down particle density at high GPU counts and low load
+  const gpuScale = gpuCount <= 128 ? 1.0 : gpuCount <= 256 ? 0.5 : 0.25;
+  const load = Math.max(0.05, loadLevel / 100);
+  const scale = gpuScale * load;
 
   // Spine-leaf (east-west fabric traffic)
   for (const link of topology.spineLeafLinks) {
@@ -1398,17 +1406,18 @@ function updateStats(dt) {
   const totalLinks = healthySpineLinks + healthyGpus;
 
   const isTraining = workloadMode === 'training';
-  const utilBase = isTraining ? 85 : 48;
-  const utilSwing = isTraining ? 8 : 12;
-  const tempBase = isTraining ? 74 : 58;
+  const load = loadLevel / 100;
+  const utilBase = (isTraining ? 85 : 48) * load;
+  const utilSwing = (isTraining ? 8 : 12) * load;
+  const tempBase = 40 + (isTraining ? 34 : 18) * load;
 
   targetStats = {
-    throughput: (count * (isTraining ? 26.2 : 15.8) * capacityRatio + Math.sin(Date.now() / 5000) * count * 2 * capacityRatio).toFixed(1),
+    throughput: (count * (isTraining ? 26.2 : 15.8) * capacityRatio * load + Math.sin(Date.now() / 5000) * count * 2 * capacityRatio * load).toFixed(1),
     gpuUtil: ((utilBase + Math.sin(Date.now() / 3000) * utilSwing) * capacityRatio).toFixed(1),
     temp: (tempBase + Math.sin(Date.now() / 7000) * 5).toFixed(1),
     sync: isTraining ? (99 + Math.random() * 0.9).toFixed(2) : (95 + Math.random() * 4).toFixed(2),
     links: totalLinks,
-    packets: (count * (isTraining ? 1.9 : 1.1) * capacityRatio + Math.sin(Date.now() / 4000) * count * 0.3 * capacityRatio).toFixed(1),
+    packets: (count * (isTraining ? 1.9 : 1.1) * capacityRatio * load + Math.sin(Date.now() / 4000) * count * 0.3 * capacityRatio * load).toFixed(1),
   };
 
   const lerp = 0.05;
@@ -2532,6 +2541,30 @@ speedSlider.addEventListener('input', () => {
   speedMultiplier = parseFloat(speedSlider.value);
   speedValue.textContent = speedMultiplier.toFixed(1) + 'x';
 });
+
+const loadSlider = document.getElementById('load-slider');
+const loadValueEl = document.getElementById('load-value');
+loadSlider.addEventListener('input', () => {
+  loadLevel = parseInt(loadSlider.value);
+  loadValueEl.textContent = loadLevel + '%';
+  applyLoad();
+});
+
+function applyLoad() {
+  if (!topology) return;
+  const t = loadLevel / 100;
+  for (const gpu of topology.gpus) {
+    if (failedGpus.has(gpu.id) || isGpuOrphaned(gpu)) continue;
+    gpu.util = t * (60 + Math.random() * 40);
+    gpu.temp = 40 + t * 50 + Math.random() * 8;
+    gpu.power = 100 + t * 300 + Math.random() * 50;
+    if (t < 0.2) gpu.state = 'idle';
+    else if (t > 0.85) gpu.state = Math.random() < 0.6 ? 'peak' : 'active';
+    else gpu.state = Math.random() < 0.3 ? 'syncing' : 'active';
+  }
+  clearSpriteCache();
+  initParticles();
+}
 
 // Phase info nav
 document.getElementById('phase-prev').addEventListener('click', () => {
