@@ -476,20 +476,6 @@
     letter-spacing: 1px;
   }
 
-  #gpu-modal .modal-close {
-    position: absolute;
-    top: 6px;
-    right: 10px;
-    background: none;
-    border: none;
-    color: #5a7a9a;
-    font-size: 14px;
-    cursor: pointer;
-    line-height: 1;
-  }
-
-  #gpu-modal .modal-close:hover { color: #e0e8f0; }
-
   #gpu-modal .stat-row {
     padding: 3px 0;
   }
@@ -675,7 +661,6 @@
 
 <!-- GPU Detail Modal -->
 <div id="gpu-modal">
-  <button class="modal-close">&times;</button>
   <div class="modal-title" id="modal-title">GPU-001</div>
   <div id="modal-body"></div>
   <div id="sparkline-wrap">
@@ -730,6 +715,23 @@ let speedMultiplier = 1.0;
 let hoverState = { node: null, link: null };
 let dragState = { node: null, offsetX: 0, offsetY: 0, isDragging: false, startX: 0, startY: 0 };
 let failedSpines = new Set();
+let failedLeaves = new Set();
+let failedGpus = new Set();
+let failedLinkKeys = new Set();
+
+function linkKey(link) { return link.from.id + ':' + link.to.id; }
+function isLinkFailed(link) {
+  if (link.type === 'spine-leaf') {
+    return failedSpines.has(link.from.id) || failedLeaves.has(link.to.id) || failedLinkKeys.has(linkKey(link));
+  }
+  if (link.type === 'leaf-gpu') {
+    return failedLeaves.has(link.from.id) || failedGpus.has(link.to.id);
+  }
+  return false;
+}
+function isGpuOrphaned(gpu) {
+  return failedLeaves.has('leaf-' + gpu.leafIdx);
+}
 let workloadMode = 'training';
 let topoMode = 'fat-tree';
 let trainingPhase = 'compute';
@@ -921,7 +923,7 @@ function initParticles() {
 
   // Spine-leaf (east-west fabric traffic)
   for (const link of topology.spineLeafLinks) {
-    if (failedSpines.has(link.from.id)) continue;
+    if (isLinkFailed(link)) continue;
     const count = Math.max(1, Math.round((isTraining ? 5 : 1) * scale));
     for (let i = 0; i < count; i++) {
       particles.push(createParticle(link));
@@ -930,6 +932,7 @@ function initParticles() {
 
   // Leaf-GPU (vertical traffic to/from GPUs)
   for (const link of topology.leafGpuLinks) {
+    if (isLinkFailed(link)) continue;
     const gpu = link.to;
     if (isTraining) {
       if (Math.random() < scale) particles.push(createParticle(link));
@@ -970,7 +973,7 @@ function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
 
-    if (p.link.type === 'spine-leaf' && failedSpines.has(p.link.from.id)) {
+    if (isLinkFailed(p.link)) {
       particles.splice(i, 1);
       continue;
     }
@@ -1340,7 +1343,7 @@ function floodSpineParticles() {
   if (!topology) return;
   const perLink = gpuCount <= 128 ? 10 : gpuCount <= 256 ? 5 : 3;
   for (const link of topology.spineLeafLinks) {
-    if (failedSpines.has(link.from.id)) continue;
+    if (isLinkFailed(link)) continue;
     for (let i = 0; i < perLink; i++) {
       const p = createParticle(link);
       p.color = CONFIG.colors.gpuSyncing;
@@ -1387,7 +1390,12 @@ function updateStats(dt) {
   const leafCount = topology ? topology.leafCount : 8;
   const spineCount = topology ? topology.spineCount : 2;
   const healthySpines = spineCount - failedSpines.size;
-  const totalLinks = healthySpines * leafCount + count;
+  const healthyLeaves = leafCount - failedLeaves.size;
+  const healthyGpus = count - failedGpus.size - (topology ? topology.gpus.filter(g => isGpuOrphaned(g)).length : 0);
+  const capacityRatio = count > 0 ? healthyGpus / count : 1;
+  let healthySpineLinks = 0;
+  if (topology) { for (const l of topology.spineLeafLinks) if (!isLinkFailed(l)) healthySpineLinks++; }
+  const totalLinks = healthySpineLinks + healthyGpus;
 
   const isTraining = workloadMode === 'training';
   const utilBase = isTraining ? 85 : 48;
@@ -1395,12 +1403,12 @@ function updateStats(dt) {
   const tempBase = isTraining ? 74 : 58;
 
   targetStats = {
-    throughput: (count * (isTraining ? 26.2 : 15.8) * (healthySpines / spineCount) + Math.sin(Date.now() / 5000) * count * 2).toFixed(1),
-    gpuUtil: (utilBase + Math.sin(Date.now() / 3000) * utilSwing).toFixed(1),
+    throughput: (count * (isTraining ? 26.2 : 15.8) * capacityRatio + Math.sin(Date.now() / 5000) * count * 2 * capacityRatio).toFixed(1),
+    gpuUtil: ((utilBase + Math.sin(Date.now() / 3000) * utilSwing) * capacityRatio).toFixed(1),
     temp: (tempBase + Math.sin(Date.now() / 7000) * 5).toFixed(1),
     sync: isTraining ? (99 + Math.random() * 0.9).toFixed(2) : (95 + Math.random() * 4).toFixed(2),
     links: totalLinks,
-    packets: (count * (isTraining ? 1.9 : 1.1) * (healthySpines / spineCount) + Math.sin(Date.now() / 4000) * count * 0.3).toFixed(1),
+    packets: (count * (isTraining ? 1.9 : 1.1) * capacityRatio + Math.sin(Date.now() / 4000) * count * 0.3 * capacityRatio).toFixed(1),
   };
 
   const lerp = 0.05;
@@ -1534,7 +1542,7 @@ function drawLinks() {
   let hoveredLink = null;
 
   for (const link of topology.spineLeafLinks) {
-    if (failedSpines.has(link.from.id)) { failedLinks.push(link); continue; }
+    if (isLinkFailed(link)) { failedLinks.push(link); continue; }
     if (hoverState.link === link) { hoveredLink = link; continue; }
 
     const leaf = link.to;
@@ -1604,7 +1612,9 @@ function drawLinks() {
   // Batch leaf-GPU links by color bucket (5% steps)
   ctx.lineWidth = 0.5;
   const linkBuckets = {};
+  const deadGpuLinks = [];
   for (const link of topology.leafGpuLinks) {
+    if (isLinkFailed(link)) { deadGpuLinks.push(link); continue; }
     const bucket = Math.round(link.to.util / 5) * 5;
     if (!linkBuckets[bucket]) linkBuckets[bucket] = [];
     linkBuckets[bucket].push(link);
@@ -1617,6 +1627,21 @@ function drawLinks() {
       ctx.lineTo(link.to.x, link.to.y);
     }
     ctx.stroke();
+  }
+
+  // Dead GPU links
+  if (deadGpuLinks.length) {
+    ctx.save();
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = hexToRgba(CONFIG.colors.failed, 0.2);
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    for (const link of deadGpuLinks) {
+      ctx.moveTo(link.from.x, link.from.y);
+      ctx.lineTo(link.to.x, link.to.y);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -1662,18 +1687,18 @@ function drawSwitchNodeDirect(c, cx, cy, radius, color, label, isFailed) {
     else c.lineTo(px, py);
   }
   c.closePath();
-  c.fillStyle = 'rgba(10, 14, 23, 0.85)';
+  c.fillStyle = isFailed ? 'rgba(244, 67, 54, 0.25)' : 'rgba(10, 14, 23, 0.85)';
   c.fill();
   c.strokeStyle = color;
-  c.lineWidth = 1.5;
+  c.lineWidth = isFailed ? 2.5 : 1.5;
   c.stroke();
 
   if (isFailed) {
-    c.font = `700 ${radius > 18 ? 10 : 8}px 'JetBrains Mono', monospace`;
-    c.fillStyle = CONFIG.colors.failed;
+    c.font = `700 ${radius > 18 ? 12 : 9}px 'JetBrains Mono', monospace`;
+    c.fillStyle = '#ffffff';
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.fillText('FAIL', cx, cy);
+    c.fillText('DOWN', cx, cy);
   } else if (label) {
     c.font = `600 ${radius > 18 ? 10 : 8}px 'JetBrains Mono', monospace`;
     c.fillStyle = color;
@@ -1684,7 +1709,8 @@ function drawSwitchNodeDirect(c, cx, cy, radius, color, label, isFailed) {
 }
 
 function drawSwitchNode(node, radius, color, label) {
-  const isFailed = node.type === 'spine' && failedSpines.has(node.id);
+  const isFailed = (node.type === 'spine' && failedSpines.has(node.id))
+    || (node.type === 'leaf' && failedLeaves.has(node.id));
   const drawColor = isFailed ? CONFIG.colors.failed : color;
 
   const spriteSize = (radius + 16) * 2;
@@ -1720,17 +1746,15 @@ function drawGpuNodeDirect(c, cx, cy, r, color) {
 }
 
 function drawGpuNode(gpu) {
-  const heatColor = utilToHeatColor(gpu.util);
   const r = gpuCount > 256 ? 4 : gpuCount > 128 ? 5 : 7;
+  const dead = failedGpus.has(gpu.id) || isGpuOrphaned(gpu);
 
-  // Quantise color to reduce sprite variants (bucket to nearest 5%)
-  const bucket = Math.round(gpu.util / 5) * 5;
-  const bucketColor = utilToHeatColor(bucket);
+  const color = dead ? CONFIG.colors.failed : utilToHeatColor(Math.round(gpu.util / 5) * 5);
   const spriteSize = (r + 12) * 2;
-  const key = `gpu-${r}-${bucket}`;
+  const key = dead ? `gpu-${r}-dead` : `gpu-${r}-${Math.round(gpu.util / 5) * 5}`;
 
   const sprite = getOrCreateSprite(key, spriteSize, spriteSize, (c, cx, cy) => {
-    drawGpuNodeDirect(c, cx, cy, r, bucketColor);
+    drawGpuNodeDirect(c, cx, cy, r, color);
   });
   ctx.drawImage(sprite, gpu.x - spriteSize / 2, gpu.y - spriteSize / 2, spriteSize, spriteSize);
 }
@@ -1767,6 +1791,21 @@ function drawNodes() {
       }
       ctx.stroke();
     }
+  }
+
+  // Orphaned/failed GPU pulsing rings
+  if (failedLeaves.size > 0 || failedGpus.size > 0) {
+    const r = gpuCount > 256 ? 4 : gpuCount > 128 ? 5 : 7;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 300);
+    ctx.strokeStyle = `rgba(244, 67, 54, ${0.3 + pulse * 0.4})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (const gpu of topology.gpus) {
+      if (!failedGpus.has(gpu.id) && !isGpuOrphaned(gpu)) continue;
+      ctx.moveTo(gpu.x + r + 4, gpu.y);
+      ctx.arc(gpu.x, gpu.y, r + 4, 0, Math.PI * 2);
+    }
+    ctx.stroke();
   }
 
   // Straggler highlight
@@ -2005,7 +2044,7 @@ function updateCongestion(dt) {
     const chance = (workloadMode === 'training' && trainingPhase === 'allreduce') ? 0.15 : 0.03;
     for (let i = 0; i < topology.spineLeafLinks.length; i++) {
       const link = topology.spineLeafLinks[i];
-      if (failedSpines.has(link.from.id)) continue;
+      if (isLinkFailed(link)) continue;
       if (Math.random() < chance) {
         congestionEvents.push({
           link,
@@ -2064,16 +2103,20 @@ function computeEcmpFlows() {
   const healthySpines = topology.spines.filter(s => !failedSpines.has(s.id));
   if (healthySpines.length === 0) return;
 
-  const totalGpus = topology.gpus.length;
-  const flowsPerSpine = Math.ceil((totalGpus * topology.leafCount) / healthySpines.length);
+  let healthyLinkCount = 0;
+  for (const link of topology.spineLeafLinks) {
+    if (!isLinkFailed(link)) healthyLinkCount++;
+  }
+  const totalGpus = topology.gpus.filter(g => !failedGpus.has(g.id) && !isGpuOrphaned(g)).length;
+  const flowsPerLink = healthyLinkCount > 0 ? Math.ceil((totalGpus * topology.leafCount) / healthyLinkCount) : 0;
 
   for (let i = 0; i < topology.spineLeafLinks.length; i++) {
     const link = topology.spineLeafLinks[i];
-    if (failedSpines.has(link.from.id)) {
+    if (isLinkFailed(link)) {
       ecmpFlows[i] = 0;
     } else {
       const jitter = Math.floor(Math.random() * 6) - 3;
-      ecmpFlows[i] = Math.max(0, flowsPerSpine + jitter);
+      ecmpFlows[i] = Math.max(0, flowsPerLink + jitter);
     }
   }
 }
@@ -2087,7 +2130,7 @@ function drawEcmpLabel() {
   if (linkIdx < 0) return;
 
   const flows = ecmpFlows[linkIdx] || 0;
-  const isFailed = failedSpines.has(link.from.id);
+  const isFailed = isLinkFailed(link);
 
   const mx = (link.from.x + link.to.x) / 2;
   const my = (link.from.y + link.to.y) / 2;
@@ -2210,6 +2253,13 @@ canvas.addEventListener('mousemove', (e) => {
   const node = findHoveredNode(mx, my);
   const link = node ? null : findHoveredLink(mx, my);
 
+  // Show/hide GPU modal on hover
+  if (node && node.type === 'gpu' && hoverState.node !== node) {
+    showGpuModal(node, e.clientX, e.clientY);
+  } else if ((!node || node.type !== 'gpu') && hoverState.node && hoverState.node.type === 'gpu') {
+    document.getElementById('gpu-modal').style.display = 'none';
+  }
+
   hoverState.node = node;
   hoverState.link = link;
 
@@ -2220,6 +2270,7 @@ canvas.addEventListener('mouseleave', () => {
   hoverState.node = null;
   hoverState.link = null;
   canvas.style.cursor = 'default';
+  document.getElementById('gpu-modal').style.display = 'none';
 });
 
 canvas.addEventListener('mousedown', (e) => {
@@ -2239,6 +2290,8 @@ canvas.addEventListener('mousedown', (e) => {
   }
 });
 
+let clickHandledByDrag = false;
+
 canvas.addEventListener('mouseup', (e) => {
   if (dragState.isDragging && dragState.node) {
     const rect = canvas.getBoundingClientRect();
@@ -2248,6 +2301,7 @@ canvas.addEventListener('mouseup', (e) => {
 
     if (dist < 5) {
       handleClick(dragState.node, e.clientX, e.clientY);
+      clickHandledByDrag = true;
     }
   }
   dragState.node = null;
@@ -2255,7 +2309,10 @@ canvas.addEventListener('mouseup', (e) => {
 });
 
 canvas.addEventListener('click', (e) => {
-  if (dragState.isDragging) return;
+  if (clickHandledByDrag) {
+    clickHandledByDrag = false;
+    return;
+  }
 
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
@@ -2264,28 +2321,43 @@ canvas.addEventListener('click', (e) => {
   const node = findHoveredNode(mx, my);
   if (node) {
     handleClick(node, e.clientX, e.clientY);
+    if (node.type === 'gpu') showGpuModal(node, e.clientX, e.clientY);
     return;
   }
 
-  document.getElementById('gpu-modal').style.display = 'none';
+  const link = findHoveredLink(mx, my);
+  if (link) {
+    handleLinkClick(link);
+    return;
+  }
 });
+
+function toggleFailure(set, id) {
+  if (set.has(id)) set.delete(id);
+  else set.add(id);
+  clearSpriteCache();
+  initParticles();
+  computeEcmpFlows();
+}
 
 function handleClick(node, clientX, clientY) {
   if (node.type === 'spine') {
-    if (failedSpines.has(node.id)) {
-      failedSpines.delete(node.id);
-    } else {
-      failedSpines.add(node.id);
-    }
-    clearSpriteCache();
-    initParticles();
-    computeEcmpFlows();
+    toggleFailure(failedSpines, node.id);
     return;
   }
-
-  if (node.type === 'gpu') {
-    showGpuModal(node, clientX, clientY);
+  if (node.type === 'leaf') {
+    toggleFailure(failedLeaves, node.id);
+    return;
   }
+  if (node.type === 'gpu') {
+    toggleFailure(failedGpus, node.id);
+    return;
+  }
+}
+
+function handleLinkClick(link) {
+  const key = linkKey(link);
+  toggleFailure(failedLinkKeys, key);
 }
 
 function showGpuModal(gpu, mx, my) {
@@ -2298,11 +2370,22 @@ function showGpuModal(gpu, mx, my) {
     active: '#ffd740', peak: '#ff6e40', syncing: '#00e676', idle: '#546e7a',
   };
 
+  const dead = failedGpus.has(gpu.id);
+  const orphaned = isGpuOrphaned(gpu);
+  const offline = dead || orphaned;
+  const statusText = dead ? 'OFFLINE' : orphaned ? 'ORPHANED' : gpu.state.toUpperCase();
+  const statusColor = offline ? CONFIG.colors.failed : (stateColors[gpu.state] || '#e0e8f0');
+
   document.getElementById('modal-body').innerHTML = `
     <div class="stat-row">
       <span class="stat-label">Status</span>
-      <span class="stat-value" style="color:${stateColors[gpu.state]}">${gpu.state.toUpperCase()}</span>
+      <span class="stat-value" style="color:${statusColor}">${statusText}</span>
     </div>
+    ${offline ? `
+    <div class="stat-row">
+      <span class="stat-label">Reason</span>
+      <span class="stat-value" style="color:${CONFIG.colors.failed};font-size:9px">${dead ? 'GPU shut down' : 'Leaf switch down'}</span>
+    </div>` : `
     <div class="stat-row">
       <span class="stat-label">Utilization</span>
       <span class="stat-value">${gpu.util.toFixed(1)}<span class="unit">%</span></span>
@@ -2318,10 +2401,10 @@ function showGpuModal(gpu, mx, my) {
     <div class="stat-row">
       <span class="stat-label">Power</span>
       <span class="stat-value">${gpu.power.toFixed(0)}<span class="unit">W</span></span>
-    </div>
+    </div>`}
     <div class="stat-row">
       <span class="stat-label">Leaf Switch</span>
-      <span class="stat-value" style="color:#4dd0e1">L${gpu.leafIdx}</span>
+      <span class="stat-value" style="color:${failedLeaves.has('leaf-' + gpu.leafIdx) ? CONFIG.colors.failed : '#4dd0e1'}">L${gpu.leafIdx}${failedLeaves.has('leaf-' + gpu.leafIdx) ? ' (DOWN)' : ''}</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">Job</span>
@@ -2381,10 +2464,6 @@ function drawSparkline(gpu) {
   sCtx.fillStyle = grd;
   sCtx.fill();
 }
-
-document.querySelector('.modal-close').addEventListener('click', () => {
-  document.getElementById('gpu-modal').style.display = 'none';
-});
 
 // ============================================================
 // Interaction: Controls
@@ -2512,6 +2591,9 @@ function setGpuCount(count) {
 
 function rebuildTopology() {
   failedSpines.clear();
+  failedLeaves.clear();
+  failedGpus.clear();
+  failedLinkKeys.clear();
   clearSpriteCache();
   topology = buildTopology(gpuCount);
   initParticles();
