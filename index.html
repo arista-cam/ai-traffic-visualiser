@@ -1051,6 +1051,97 @@ function showPhaseByIndex(idx) {
   document.getElementById('phase-detail').textContent = info.detail;
   document.getElementById('phase-info').style.borderColor = hexToRgba(info.color, 0.2);
   document.getElementById('phase-counter').textContent = `${currentPhaseIdx + 1} / ${PHASE_KEYS.length}`;
+
+  if (phaseInfoPinned) forcePhase(key);
+}
+
+function forcePhase(key) {
+  if (!topology) return;
+  straggler = null;
+  checkpointState = 'none';
+
+  if (key === 'inference') {
+    workloadMode = 'inference';
+    trainingPhase = '';
+    document.querySelectorAll('[data-workload]').forEach(b =>
+      b.classList.toggle('active', b.dataset.workload === 'inference'));
+    for (const gpu of topology.gpus) {
+      const states = ['active', 'idle', 'peak', 'idle', 'active'];
+      gpu.state = states[Math.floor(Math.random() * states.length)];
+      gpu.util = gpu.state === 'idle' ? 5 + Math.random() * 15
+        : gpu.state === 'peak' ? 80 + Math.random() * 20
+        : 30 + Math.random() * 40;
+    }
+    document.getElementById('status-text').textContent = 'SERVING REQUESTS';
+    document.getElementById('stat-phase').textContent = 'INFERENCE';
+    document.getElementById('stat-phase').style.color = '#4dd0e1';
+    initParticles();
+    return;
+  }
+
+  // All training phases
+  workloadMode = 'training';
+  document.querySelectorAll('[data-workload]').forEach(b =>
+    b.classList.toggle('active', b.dataset.workload === 'training'));
+
+  if (key === 'training-compute') {
+    trainingPhase = 'compute';
+    trainingPhaseTimer = 0;
+    for (const gpu of topology.gpus) {
+      gpu.state = Math.random() < 0.7 ? 'active' : 'peak';
+      gpu.util = 75 + Math.random() * 25;
+      gpu.temp = 70 + Math.random() * 18;
+    }
+    document.getElementById('status-text').textContent = 'COMPUTE IN PROGRESS';
+    document.getElementById('stat-phase').textContent = 'COMPUTE';
+    document.getElementById('stat-phase').style.color = '#ffd740';
+    initParticles();
+  } else if (key === 'training-allreduce') {
+    trainingPhase = 'allreduce';
+    trainingPhaseTimer = 0;
+    for (const gpu of topology.gpus) {
+      gpu.state = 'syncing';
+      gpu.util = 40 + Math.random() * 30;
+      gpu.temp = 65 + Math.random() * 12;
+    }
+    initParticles();
+    floodSpineParticles();
+    document.getElementById('status-text').textContent = 'ALL-REDUCE IN PROGRESS';
+    document.getElementById('stat-phase').textContent = 'ALL-REDUCE';
+    document.getElementById('stat-phase').style.color = '#00e676';
+  } else if (key === 'training-straggler') {
+    trainingPhase = 'allreduce';
+    trainingPhaseTimer = 0;
+    const idx = Math.floor(Math.random() * topology.gpus.length);
+    topology.gpus[idx].state = 'peak';
+    topology.gpus[idx].util = 98;
+    topology.gpus[idx].temp = 90;
+    for (let i = 0; i < topology.gpus.length; i++) {
+      if (i === idx) continue;
+      topology.gpus[i].state = 'idle';
+      topology.gpus[i].util = 5 + Math.random() * 10;
+    }
+    straggler = { gpuIdx: idx, startTime: performance.now(), duration: Infinity };
+    clearSpriteCache();
+    initParticles();
+    document.getElementById('status-text').textContent = 'STRAGGLER DETECTED — CLUSTER WAITING';
+    document.getElementById('stat-phase').textContent = 'STRAGGLER';
+    document.getElementById('stat-phase').style.color = '#f44336';
+  } else if (key === 'training-checkpoint') {
+    trainingPhase = 'compute';
+    trainingPhaseTimer = 0;
+    checkpointState = 'saving';
+    checkpointTimer = 0;
+    for (const gpu of topology.gpus) {
+      gpu.state = 'idle';
+      gpu.util = 5 + Math.random() * 10;
+    }
+    drainSpineParticles();
+    initParticles();
+    document.getElementById('status-text').textContent = 'CHECKPOINT — SAVING MODEL STATE';
+    document.getElementById('stat-phase').textContent = 'CHECKPOINT';
+    document.getElementById('stat-phase').style.color = '#ffc107';
+  }
 }
 
 function updatePhaseInfo(key) {
@@ -1070,6 +1161,8 @@ function updateGpuStates(dt) {
 }
 
 function updateTrainingMode(dt) {
+  if (phaseInfoPinned) return;
+
   trainingPhaseTimer += dt * speedMultiplier;
 
   const phaseDuration = trainingPhase === 'compute' ? TRAINING_COMPUTE_DURATION : TRAINING_ALLREDUCE_DURATION;
@@ -1121,7 +1214,7 @@ function updateTrainingMode(dt) {
 
 function updateStraggler(dt) {
   if (workloadMode !== 'training') { straggler = null; return; }
-  if (!topology) return;
+  if (!topology || phaseInfoPinned) return;
 
   stragglerCooldown -= dt * speedMultiplier;
 
@@ -1166,6 +1259,7 @@ function updateStraggler(dt) {
 
 function updateCheckpoint(dt) {
   if (workloadMode !== 'training') { checkpointState = 'none'; return; }
+  if (phaseInfoPinned) return;
 
   checkpointCooldown -= dt * speedMultiplier;
 
@@ -1217,6 +1311,7 @@ function updateCheckpoint(dt) {
 }
 
 function updateInferenceMode(dt) {
+  if (phaseInfoPinned) return;
   if (stateTimer < 2000) return;
   stateTimer = 0;
   if (!topology) return;
@@ -2373,6 +2468,25 @@ document.getElementById('phase-next').addEventListener('click', () => {
 document.getElementById('phase-pin').addEventListener('click', () => {
   phaseInfoPinned = !phaseInfoPinned;
   updatePinButton();
+  if (!phaseInfoPinned) {
+    // Resuming AUTO — reset to compute phase and let simulation cycle naturally
+    straggler = null;
+    checkpointState = 'none';
+    checkpointCooldown = CHECKPOINT_INTERVAL;
+    stragglerCooldown = 15000;
+    trainingPhase = 'compute';
+    trainingPhaseTimer = 0;
+    stateTimer = 0;
+    if (topology) {
+      for (const gpu of topology.gpus) {
+        gpu.state = Math.random() < 0.7 ? 'active' : 'peak';
+        gpu.util = 75 + Math.random() * 25;
+        gpu.temp = 70 + Math.random() * 18;
+      }
+    }
+    clearSpriteCache();
+    initParticles();
+  }
 });
 function updatePinButton() {
   const btn = document.getElementById('phase-pin');
