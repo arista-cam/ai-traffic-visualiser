@@ -19,8 +19,11 @@ A simulated data center fabric connecting up to 512 GPUs through Arista leaf and
 
 ### Topology Modes
 
-- **Fat-Tree** — Classic spine-leaf with consecutive GPUs assigned to the same leaf switch
-- **Rail-Optimized** — Same-index GPUs across servers share a leaf (rail), optimized for all-reduce patterns
+Independent toggles that combine freely:
+
+- **Fat-Tree / Rail-Optimized** — Fat-tree assigns consecutive GPUs to the same leaf; rail-optimized assigns same-index GPUs across servers to the same leaf (rail)
+- **2-Tier / 3-Tier** — 2-tier is spine-leaf; 3-tier adds a super-spine layer above the spines for larger clusters
+- **Single / Multi-Plane** — Single plane is one spine-leaf fabric; multi-plane shows two independent fabrics side by side with shared GPUs connecting to both planes via separate NIC ports
 
 ### AI Networking Technology Scenarios
 

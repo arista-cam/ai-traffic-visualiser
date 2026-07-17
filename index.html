@@ -712,6 +712,16 @@
     <button class="mode-btn active" data-topo="fat-tree">Fat-Tree</button>
     <button class="mode-btn" data-topo="rail-optimized">Rail-Opt</button>
   </div>
+  <div class="mode-group">
+    <label>Tiers</label>
+    <button class="mode-btn active" data-tiers="2">2-Tier</button>
+    <button class="mode-btn" data-tiers="3">3-Tier</button>
+  </div>
+  <div class="mode-group">
+    <label>Planes</label>
+    <button class="mode-btn active" data-planes="1">Single</button>
+    <button class="mode-btn" data-planes="2">Multi</button>
+  </div>
 </div>
 
 <!-- Bottom Bar -->
@@ -825,7 +835,9 @@ let failedLinkKeys = new Set();
 function linkKey(link) { return link.from.id + ':' + link.to.id; }
 function isLinkFailed(link) {
   if (link.type === 'spine-leaf') {
-    return failedSpines.has(link.from.id) || failedLeaves.has(link.to.id) || failedLinkKeys.has(linkKey(link));
+    const fromFailed = failedSpines.has(link.from.id);
+    const toFailed = link.to.gpus ? failedLeaves.has(link.to.id) : failedSpines.has(link.to.id);
+    return fromFailed || toFailed || failedLinkKeys.has(linkKey(link));
   }
   if (link.type === 'leaf-gpu') {
     return failedLeaves.has(link.from.id) || failedGpus.has(link.to.id);
@@ -833,10 +845,21 @@ function isLinkFailed(link) {
   return false;
 }
 function isGpuOrphaned(gpu) {
-  return failedLeaves.has('leaf-' + gpu.leafIdx);
+  if (!topology) return false;
+  // In multi-plane, orphaned only if ALL connected leaves are down
+  if (gpu.leafIndices && gpu.leafIndices.length > 0) {
+    return gpu.leafIndices.every(li => {
+      const leaf = topology.leaves[li];
+      return leaf && failedLeaves.has(leaf.id);
+    });
+  }
+  const leaf = topology.leaves[gpu.leafIdx];
+  return leaf && failedLeaves.has(leaf.id);
 }
 let workloadMode = 'training';
 let topoMode = 'fat-tree';
+let tierCount = 2;
+let planeCount = 1;
 
 // Educational scenario state
 let activeScenario = null;
@@ -912,108 +935,165 @@ function getOrCreateSprite(key, w, h, drawFn) {
 // Topology Builder
 // ============================================================
 function buildTopology(count, overrideSpineCount) {
-  const leafCount = Math.ceil(count / CONFIG.gpusPerLeaf);
-  const spineCount = overrideSpineCount || (leafCount <= 8 ? 2 : leafCount <= 16 ? 4 : 8);
+  const is3Tier = tierCount === 3;
+  const isMultiPlane = planeCount === 2;
+  const planes = isMultiPlane ? 2 : 1;
 
   const w = canvas.width / dpr;
   const h = canvas.height / dpr;
-
   const bottomBarH = 44;
   const topPad = 110;
   const usableH = h - bottomBarH - topPad;
-
-  const spineTierY = topPad + usableH * 0.08;
-  const leafTierY = topPad + usableH * 0.38;
-  const gpuTierTopY = topPad + usableH * 0.62;
-  const gpuTierBotY = topPad + usableH * 0.82;
-
   const sidePad = 60;
-  const usableW = w - sidePad * 2;
 
-  const spines = [];
-  for (let i = 0; i < spineCount; i++) {
-    const x = sidePad + usableW * (i + 0.5) / spineCount;
-    spines.push({ id: `spine-${i}`, type: 'spine', x, y: spineTierY, label: 'SPINE' });
+  // Per-plane GPU count
+  const gpuPerPlane = count;
+  const leafPerPlane = Math.ceil(gpuPerPlane / CONFIG.gpusPerLeaf);
+  const spinePerPlane = overrideSpineCount || (leafPerPlane <= 8 ? 2 : leafPerPlane <= 16 ? 4 : 8);
+  const superSpineCount = is3Tier ? (spinePerPlane <= 4 ? 2 : 4) : 0;
+
+  // Tier Y positions
+  let superSpineTierY, spineTierY, leafTierY, gpuTierTopY, gpuTierBotY;
+  if (is3Tier) {
+    superSpineTierY = topPad + usableH * 0.04;
+    spineTierY = topPad + usableH * 0.22;
+    leafTierY = topPad + usableH * 0.42;
+    gpuTierTopY = topPad + usableH * 0.62;
+    gpuTierBotY = topPad + usableH * 0.80;
+  } else {
+    superSpineTierY = 0;
+    spineTierY = topPad + usableH * 0.08;
+    leafTierY = topPad + usableH * 0.38;
+    gpuTierTopY = topPad + usableH * 0.62;
+    gpuTierBotY = topPad + usableH * 0.82;
   }
 
-  const leaves = [];
-  for (let i = 0; i < leafCount; i++) {
-    const x = sidePad + usableW * (i + 0.5) / leafCount;
-    leaves.push({ id: `leaf-${i}`, type: 'leaf', x, y: leafTierY, label: `L${i}`, gpus: [] });
-  }
+  const allSpines = [], allLeaves = [], allGpus = [];
+  const allSpineLeafLinks = [], allLeafGpuLinks = [];
+  const superSpines = [];
+  const superSpineLinks = [];
 
-  const gpus = [];
+  // GPUs are shared across planes — create once, centered
+  const gpuUsableW = w - sidePad * 2;
   const gpuStates = ['active', 'active', 'active', 'active', 'active', 'peak', 'syncing', 'idle'];
   const gpusTop = Math.ceil(count / 2);
-  const gpusBot = count - gpusTop;
-
   for (let i = 0; i < count; i++) {
     const isTop = i < gpusTop;
-    const rowCount = isTop ? gpusTop : gpusBot;
+    const rowCount = isTop ? gpusTop : count - gpusTop;
     const rowIndex = isTop ? i : i - gpusTop;
     const tierY = isTop ? gpuTierTopY : gpuTierBotY;
-    const x = sidePad + usableW * (rowIndex + 0.5) / rowCount;
-
-    let leafIdx;
-    if (topoMode === 'rail-optimized') {
-      leafIdx = i % leafCount;
-    } else {
-      leafIdx = Math.floor(i / CONFIG.gpusPerLeaf) % leafCount;
-    }
-
+    const x = sidePad + gpuUsableW * (rowIndex + 0.5) / rowCount;
     const state = gpuStates[Math.floor(Math.random() * gpuStates.length)];
 
-    const gpu = {
+    allGpus.push({
       id: `gpu-${i}`,
       type: 'gpu',
       x, y: tierY,
       state,
-      leafIdx,
+      leafIdx: -1, // set per-plane below
+      leafIndices: [], // one per plane
       row: isTop ? 0 : 1,
       temp: 60 + Math.random() * 25,
       util: 30 + Math.random() * 65,
       mem: 40 + Math.random() * 55,
       power: 200 + Math.random() * 200,
-    };
-    gpus.push(gpu);
-    leaves[leafIdx].gpus.push(gpu);
+      plane: 0,
+    });
   }
 
-  const spineLeafLinks = [];
-  for (const s of spines) {
-    for (const l of leaves) {
-      spineLeafLinks.push({ from: s, to: l, type: 'spine-leaf' });
+  // Create spines + leaves per plane, link to shared GPUs
+  for (let p = 0; p < planes; p++) {
+    const planeW = isMultiPlane ? w * 0.5 - sidePad : w - sidePad * 2;
+    const planeLeft = isMultiPlane ? (p === 0 ? sidePad : w * 0.5 + sidePad * 0.5) : sidePad;
+    const pfx = isMultiPlane ? `p${p}-` : '';
+
+    // Spines
+    for (let i = 0; i < spinePerPlane; i++) {
+      const x = planeLeft + planeW * (i + 0.5) / spinePerPlane;
+      allSpines.push({ id: `${pfx}spine-${i}`, type: 'spine', x, y: spineTierY, label: 'SPINE', plane: p });
+    }
+
+    // Leaves
+    const planeLeafStart = allLeaves.length;
+    for (let i = 0; i < leafPerPlane; i++) {
+      const x = planeLeft + planeW * (i + 0.5) / leafPerPlane;
+      allLeaves.push({ id: `${pfx}leaf-${i}`, type: 'leaf', x, y: leafTierY, label: `L${i}`, gpus: [], plane: p });
+    }
+
+    // Assign GPUs to leaves in this plane and create leaf-GPU links
+    for (let i = 0; i < count; i++) {
+      let leafIdx;
+      if (topoMode === 'rail-optimized') {
+        leafIdx = i % leafPerPlane;
+      } else {
+        leafIdx = Math.floor(i / CONFIG.gpusPerLeaf) % leafPerPlane;
+      }
+      const absLeafIdx = planeLeafStart + leafIdx;
+      const gpu = allGpus[i];
+      gpu.leafIndices.push(absLeafIdx);
+      if (p === 0) gpu.leafIdx = absLeafIdx;
+      allLeaves[absLeafIdx].gpus.push(gpu);
+      allLeafGpuLinks.push({ from: allLeaves[absLeafIdx], to: gpu, type: 'leaf-gpu' });
+    }
+
+    // Spine-leaf links (full mesh within this plane)
+    const planeSpineStart = p * spinePerPlane;
+    for (let si = planeSpineStart; si < planeSpineStart + spinePerPlane; si++) {
+      for (let li = planeLeafStart; li < planeLeafStart + leafPerPlane; li++) {
+        allSpineLeafLinks.push({ from: allSpines[si], to: allLeaves[li], type: 'spine-leaf' });
+      }
     }
   }
 
-  const leafGpuLinks = [];
-  for (const gpu of gpus) {
-    leafGpuLinks.push({ from: leaves[gpu.leafIdx], to: gpu, type: 'leaf-gpu' });
+  // Super-spines (3-tier only — shared across planes)
+  if (is3Tier) {
+    const ssW = isMultiPlane ? w - sidePad * 2 : w - sidePad * 2;
+    for (let i = 0; i < superSpineCount; i++) {
+      const x = sidePad + ssW * (i + 0.5) / superSpineCount;
+      superSpines.push({ id: `sspine-${i}`, type: 'spine', x, y: superSpineTierY, label: 'S-SPINE', plane: -1 });
+    }
+    for (const ss of superSpines) {
+      for (const sp of allSpines) {
+        superSpineLinks.push({ from: ss, to: sp, type: 'spine-leaf' });
+      }
+    }
   }
+
+  // Combine all spines (super-spines are drawn as spines too)
+  const combinedSpines = [...superSpines, ...allSpines];
 
   // Init sparkline history
   gpuUtilHistory = {};
   historyWriteIdx = 0;
-  for (const gpu of gpus) {
+  for (const gpu of allGpus) {
     gpuUtilHistory[gpu.id] = new Float32Array(SPARKLINE_HISTORY_LEN);
   }
 
-  // Assign GPUs to jobs (contiguous blocks)
-  const jobCount = count <= 64 ? 2 : 3;
-  const gpusPerJob = Math.floor(count / jobCount);
+  // Assign GPUs to jobs
+  const totalGpus = allGpus.length;
+  const jobCount = totalGpus <= 64 ? 2 : 3;
+  const gpusPerJob = Math.floor(totalGpus / jobCount);
   gpuJobAssignments = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < totalGpus; i++) {
     const job = Math.min(Math.floor(i / gpusPerJob), jobCount - 1);
     gpuJobAssignments.push(job);
-    gpus[i].job = job;
+    allGpus[i].job = job;
   }
 
+  const allSpineLinks = [...superSpineLinks, ...allSpineLeafLinks];
+
   return {
-    spines, leaves, gpus,
-    spineLeafLinks, leafGpuLinks,
-    allLinks: [...spineLeafLinks, ...leafGpuLinks],
-    spineCount, leafCount,
-    tierYs: { spine: spineTierY, leaf: leafTierY, gpuTop: gpuTierTopY, gpuBot: gpuTierBotY },
+    spines: combinedSpines, leaves: allLeaves, gpus: allGpus,
+    superSpines, superSpineLinks,
+    spineLeafLinks: allSpineLinks, leafGpuLinks: allLeafGpuLinks,
+    allLinks: [...allSpineLinks, ...allLeafGpuLinks],
+    spineCount: spinePerPlane * planes, leafCount: leafPerPlane * planes,
+    superSpineCount,
+    tierYs: {
+      superSpine: superSpineTierY, spine: spineTierY,
+      leaf: leafTierY, gpuTop: gpuTierTopY, gpuBot: gpuTierBotY,
+    },
+    planes,
   };
 }
 
@@ -1920,6 +2000,9 @@ function drawLinks() {
     if (isLinkFailed(link)) { failedLinks.push(link); continue; }
     if (hoverState.link === link) { hoveredLink = link; continue; }
 
+    // Super-spine→spine links don't have .gpus on the target
+    if (!link.to.gpus) { normalLinks.push(link); continue; }
+
     const leaf = link.to;
     let peakCount = 0;
     for (const g of leaf.gpus) if (g.state === 'peak') peakCount++;
@@ -2238,9 +2321,21 @@ function drawTierLabels() {
   ctx.textAlign = 'center';
 
   const cx = canvas.width / dpr / 2;
-  ctx.fillText('SPINE TIER', cx, topology.tierYs.spine - 30);
+  if (topology.superSpineCount > 0) {
+    ctx.fillText('SUPER-SPINE TIER', cx, topology.tierYs.superSpine - 20);
+  }
+  ctx.fillText('SPINE TIER', cx, topology.tierYs.spine - (topology.superSpineCount > 0 ? 20 : 30));
   ctx.fillText('LEAF TIER', cx, topology.tierYs.leaf - 22);
   ctx.fillText('GPU COMPUTE TIER', cx, topology.tierYs.gpuTop - 22);
+
+  if (topology.planes > 1) {
+    const pw = canvas.width / dpr;
+    ctx.font = "700 12px 'JetBrains Mono', monospace";
+    ctx.fillStyle = 'rgba(77, 208, 225, 0.18)';
+    ctx.fillText('PLANE 0', pw * 0.25, topology.tierYs.spine - 45);
+    ctx.fillStyle = 'rgba(224, 64, 251, 0.18)';
+    ctx.fillText('PLANE 1', pw * 0.75, topology.tierYs.spine - 45);
+  }
 }
 
 function drawLeafTooltip() {
@@ -2298,44 +2393,53 @@ function drawLeafTooltip() {
 function drawPathTrace() {
   if (!hoverState.node || hoverState.node.type !== 'gpu' || !topology) return;
   const gpu = hoverState.node;
-  const leaf = topology.leaves[gpu.leafIdx];
 
-  // Highlight GPU → Leaf link
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(gpu.x, gpu.y);
-  ctx.lineTo(leaf.x, leaf.y);
-  ctx.stroke();
+  // Get all leaves this GPU connects to (one per plane)
+  const leafIndices = (gpu.leafIndices && gpu.leafIndices.length > 0)
+    ? gpu.leafIndices : [gpu.leafIdx];
+  const connectedLeaves = leafIndices.map(li => topology.leaves[li]).filter(Boolean);
 
-  // Highlight Leaf → all healthy Spines
-  for (const spine of topology.spines) {
-    if (failedSpines.has(spine.id)) continue;
-    ctx.strokeStyle = 'rgba(77, 208, 225, 0.35)';
-    ctx.lineWidth = 1.8;
+  for (const leaf of connectedLeaves) {
+    // Highlight GPU → Leaf link
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(leaf.x, leaf.y);
-    ctx.lineTo(spine.x, spine.y);
+    ctx.moveTo(gpu.x, gpu.y);
+    ctx.lineTo(leaf.x, leaf.y);
     ctx.stroke();
 
-    // Spine → all other leaves
-    for (const otherLeaf of topology.leaves) {
-      if (otherLeaf === leaf) continue;
-      ctx.strokeStyle = 'rgba(77, 208, 225, 0.12)';
-      ctx.lineWidth = 1;
+    // Find spines in the same plane as this leaf
+    const leafPlane = leaf.plane;
+    for (const spine of topology.spines) {
+      if (failedSpines.has(spine.id)) continue;
+      if (spine.plane !== undefined && spine.plane !== -1 && spine.plane !== leafPlane) continue;
+      ctx.strokeStyle = 'rgba(77, 208, 225, 0.35)';
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
-      ctx.moveTo(spine.x, spine.y);
-      ctx.lineTo(otherLeaf.x, otherLeaf.y);
+      ctx.moveTo(leaf.x, leaf.y);
+      ctx.lineTo(spine.x, spine.y);
       ctx.stroke();
-    }
-  }
 
-  // Glow on the source leaf
-  ctx.beginPath();
-  ctx.arc(leaf.x, leaf.y, 24, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+      // Spine → other leaves in the same plane
+      for (const otherLeaf of topology.leaves) {
+        if (otherLeaf === leaf) continue;
+        if (otherLeaf.plane !== leafPlane) continue;
+        ctx.strokeStyle = 'rgba(77, 208, 225, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(spine.x, spine.y);
+        ctx.lineTo(otherLeaf.x, otherLeaf.y);
+        ctx.stroke();
+      }
+    }
+
+    // Glow on the leaf
+    ctx.beginPath();
+    ctx.arc(leaf.x, leaf.y, 24, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
 }
 
 // ============================================================
@@ -3241,11 +3345,37 @@ document.querySelectorAll('[data-topo]').forEach(btn => {
   btn.addEventListener('click', () => {
     topoMode = btn.dataset.topo;
     document.querySelectorAll('[data-topo]').forEach(b => b.classList.toggle('active', b === btn));
-    document.getElementById('sub-title').textContent =
-      `ARISTA 400GbE · ${topoMode === 'fat-tree' ? 'FAT-TREE' : 'RAIL-OPTIMIZED'}`;
+    updateSubTitle();
     rebuildTopology();
   });
 });
+
+// Tiers toggle
+document.querySelectorAll('[data-tiers]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    tierCount = parseInt(btn.dataset.tiers);
+    document.querySelectorAll('[data-tiers]').forEach(b => b.classList.toggle('active', b === btn));
+    updateSubTitle();
+    rebuildTopology();
+  });
+});
+
+// Planes toggle
+document.querySelectorAll('[data-planes]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    planeCount = parseInt(btn.dataset.planes);
+    document.querySelectorAll('[data-planes]').forEach(b => b.classList.toggle('active', b === btn));
+    updateSubTitle();
+    rebuildTopology();
+  });
+});
+
+function updateSubTitle() {
+  const topo = topoMode === 'fat-tree' ? 'FAT-TREE' : 'RAIL-OPTIMIZED';
+  const tiers = tierCount === 3 ? '3-TIER' : '2-TIER';
+  const planes = planeCount > 1 ? ' · MULTI-PLANE' : '';
+  document.getElementById('sub-title').textContent = `ARISTA 400GbE · ${tiers} ${topo}${planes}`;
+}
 
 // Pause/Play
 const pauseBtn = document.getElementById('pause-btn');
