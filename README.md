@@ -22,6 +22,23 @@ A simulated data center fabric connecting up to 512 GPUs through Arista leaf and
 - **Fat-Tree** — Classic spine-leaf with consecutive GPUs assigned to the same leaf switch
 - **Rail-Optimized** — Same-index GPUs across servers share a leaf (rail), optimized for all-reduce patterns
 
+### AI Networking Technology Scenarios
+
+Browse 10 educational scenario cards explaining the protocols and technologies used in AI networking. Each scenario drives the simulation to demonstrate the concept visually, with a "More Info" button for deep-dive explanations.
+
+| Scenario | What It Shows |
+|----------|--------------|
+| **Static ECMP** | Hash polarisation — one spine overloaded, others idle |
+| **Dynamic Load Balancing (DLB)** | Hardware port-quality sampling redistributes flows |
+| **Cluster Load Balancing (CLB)** | Per-flow round-robin prevents downstream contention |
+| **Priority Flow Control (PFC)** | Hop-by-hop backpressure cascade from a congested link |
+| **ECN** | Congestion marking at the switch, sender rate reduction |
+| **Ultra Ethernet (UEC)** | Packet trimming — trim instead of drop for faster recovery |
+| **NCCL Ring All-Reduce** | Unidirectional ring pattern through GPUs |
+| **NCCL Tree All-Reduce** | Binary tree reduce/broadcast with phase animation |
+| **MRC (Multipath Reliable Connection)** | OCP spec — single QP sprays across all spine paths |
+| **Switch Radix** | Port density, 1:1 non-blocking topology scaling |
+
 ### Interactive Features
 
 - **GPU count selector** — Switch between 64, 128, 256, and 512 GPUs
@@ -37,7 +54,7 @@ A simulated data center fabric connecting up to 512 GPUs through Arista leaf and
 - **Pause/Play** — Spacebar or button; freeze the simulation while keeping interaction
 - **Speed slider** — 0.1x to 5x simulation speed
 - **Load slider** — 0-100% network load; controls GPU utilization, particle density, throughput, and temperatures
-- **Phase info panel** — Browse all phases with ◀ ▶ buttons; pin to stop auto-switching and force the simulation into that phase
+- **Phase info panel** — Browse all scenarios with ◀ ▶ buttons; pin to force the simulation into that phase; "More Info" for detailed explanations
 
 ### Visual Features
 

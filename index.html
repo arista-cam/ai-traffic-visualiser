@@ -270,6 +270,93 @@
     letter-spacing: 1px;
   }
 
+  /* Info Modal */
+  #info-modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #info-modal.visible {
+    display: flex;
+  }
+
+  #info-modal-inner {
+    background: rgba(10, 14, 23, 0.95);
+    border: 1px solid rgba(100, 180, 255, 0.2);
+    border-radius: 10px;
+    padding: 28px 32px;
+    max-width: 520px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    backdrop-filter: blur(16px);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+    position: relative;
+  }
+
+  #info-modal-heading {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+
+  #info-modal-body {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #a0b8cc;
+  }
+
+  #info-modal-body h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #e0e8f0;
+    margin: 18px 0 8px 0;
+    text-transform: uppercase;
+  }
+
+  #info-modal-body ul {
+    padding-left: 18px;
+    margin: 8px 0;
+  }
+
+  #info-modal-body li {
+    margin-bottom: 6px;
+  }
+
+  #info-modal-body code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    background: rgba(100, 180, 255, 0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #4dd0e1;
+  }
+
+  #info-modal-close {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    background: none;
+    border: none;
+    color: #5a7a9a;
+    font-size: 22px;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  #info-modal-close:hover { color: #e0e8f0; }
+
   /* Bottom Bar */
   #bottom-bar {
     position: fixed;
@@ -588,9 +675,19 @@
   <div class="phase-detail" id="phase-detail">Traffic: GPU ← data from leaf switches · Spine fabric idle</div>
   <div class="phase-nav">
     <button class="phase-nav-btn" id="phase-prev" title="Previous phase">◀</button>
-    <span class="phase-nav-counter" id="phase-counter">1 / 5</span>
+    <span class="phase-nav-counter" id="phase-counter"></span>
     <button class="phase-nav-btn" id="phase-pin" title="Pin to stop auto-switching">📌 AUTO</button>
     <button class="phase-nav-btn" id="phase-next" title="Next phase">▶</button>
+  </div>
+  <button class="phase-nav-btn" id="phase-more" style="width:100%;margin-top:8px">More Info</button>
+</div>
+
+<!-- More Info Modal -->
+<div id="info-modal">
+  <div id="info-modal-inner">
+    <button id="info-modal-close">&times;</button>
+    <div id="info-modal-heading"></div>
+    <div id="info-modal-body"></div>
   </div>
 </div>
 
@@ -740,6 +837,10 @@ function isGpuOrphaned(gpu) {
 }
 let workloadMode = 'training';
 let topoMode = 'fat-tree';
+
+// Educational scenario state
+let activeScenario = null;
+let scenarioState = {};
 let trainingPhase = 'compute';
 let trainingPhaseTimer = 0;
 const TRAINING_COMPUTE_DURATION = 8000;
@@ -810,9 +911,9 @@ function getOrCreateSprite(key, w, h, drawFn) {
 // ============================================================
 // Topology Builder
 // ============================================================
-function buildTopology(count) {
+function buildTopology(count, overrideSpineCount) {
   const leafCount = Math.ceil(count / CONFIG.gpusPerLeaf);
-  const spineCount = leafCount <= 8 ? 2 : leafCount <= 16 ? 4 : 8;
+  const spineCount = overrideSpineCount || (leafCount <= 8 ? 2 : leafCount <= 16 ? 4 : 8);
 
   const w = canvas.width / dpr;
   const h = canvas.height / dpr;
@@ -1021,30 +1122,105 @@ const PHASE_INFO = {
     color: '#ffd740',
     desc: 'GPUs perform forward and backward passes on the model. Each GPU processes its shard of the training batch independently.',
     detail: 'Traffic: data flows leaf → GPU · Spine fabric relatively quiet',
+    moreInfo: '<h3>What happens</h3><p>Each GPU holds a partition of the training data (data parallelism) or a shard of the model (model/pipeline parallelism). During the compute phase, every GPU independently runs the forward pass (inference on a training batch) followed by the backward pass (gradient computation).</p><h3>Network impact</h3><p>Traffic is primarily north-south: training data flows from storage through the leaf switches down to GPUs. The spine fabric is relatively quiet since GPUs are not communicating with each other during this phase.</p><h3>Duration</h3><p>Typically the longest phase — depends on model size, batch size, and GPU performance. Can range from milliseconds (small models) to seconds (large models like GPT-4).</p>',
   },
   'training-allreduce': {
     heading: 'TRAINING · ALL-REDUCE',
     color: '#00e676',
     desc: 'GPUs synchronise gradients across the cluster. Every GPU exchanges data with every other GPU through the spine fabric — this is the most network-intensive phase.',
     detail: 'Traffic: heavy GPU ↔ GPU via spine · All links saturated',
+    moreInfo: '<h3>What happens</h3><p>After computing gradients locally, every GPU must share its gradients with every other GPU and compute the average. This is the all-reduce collective operation — the single most important network operation in distributed training.</p><h3>Network impact</h3><p>Massive east-west traffic through the spine fabric. Every GPU sends data to every other GPU simultaneously, creating the peak bandwidth demand on the network. This is why AI fabrics need non-blocking spine capacity.</p><h3>Algorithms</h3><ul><li><strong>Ring all-reduce</strong> — bandwidth-optimal for large messages, GPUs form a ring</li><li><strong>Tree all-reduce</strong> — latency-optimal for small messages, logarithmic depth</li></ul><h3>Why it matters</h3><p>The all-reduce phase is where network performance directly impacts training throughput. Every microsecond of network latency here is multiplied by thousands of iterations per training run.</p>',
   },
   'training-straggler': {
     heading: 'TRAINING · STRAGGLER',
     color: '#f44336',
     desc: 'One GPU is taking much longer than the rest. All other GPUs must wait — all-reduce cannot complete until every GPU has finished. This is the #1 killer of training throughput at scale.',
     detail: 'Traffic: cluster stalled · All GPUs idle except straggler',
+    moreInfo: '<h3>What happens</h3><p>All-reduce is a synchronous collective — it cannot complete until every GPU has contributed its gradients. If one GPU is slow (due to thermal throttling, ECC errors, PCIe issues, or software bugs), the entire cluster waits.</p><h3>Scale impact</h3><p>At 1,000 GPUs, the probability of at least one straggler per iteration is high. At 10,000+ GPUs it becomes near-certain. This is the #1 reason training throughput degrades at scale.</p><h3>Mitigation</h3><ul><li>Monitor GPU performance metrics (utilization, temperature, error counts)</li><li>Proactive replacement of degraded GPUs</li><li>Timeout-based detection with automatic job rescheduling</li><li>Asynchronous gradient methods (trade accuracy for resilience)</li></ul>',
   },
   'training-checkpoint': {
     heading: 'TRAINING · CHECKPOINT',
     color: '#ffc107',
     desc: 'Saving model weights and optimizer state to persistent storage. All GPUs pause computation to write a consistent snapshot — if a node fails, training resumes from the last checkpoint.',
     detail: 'Traffic: GPU → storage (write) · Compute paused',
+    moreInfo: '<h3>What happens</h3><p>All GPUs pause training and write a consistent snapshot of model weights, optimizer state, and training metadata to persistent storage (typically a distributed filesystem). This creates a recovery point.</p><h3>Why it matters</h3><p>Large training runs can take weeks or months. Without checkpoints, a single node failure would lose all progress. Checkpoints enable resumption from the last saved state, losing only the iterations since the last checkpoint.</p><h3>Trade-offs</h3><ul><li>More frequent checkpoints = less work lost on failure, but more overhead</li><li>Less frequent checkpoints = lower overhead, but higher risk</li><li>Typical interval: every 10-30 minutes for large runs</li></ul><h3>Network impact</h3><p>Traffic shifts from east-west (GPU-to-GPU) to north-south (GPU-to-storage). The spine fabric goes quiet while storage network links are saturated.</p>',
   },
   'inference': {
     heading: 'INFERENCE · SERVING',
     color: '#4dd0e1',
     desc: 'GPUs serve requests independently. Incoming queries are routed to available GPUs, processed, and returned. No GPU-to-GPU coordination is needed.',
     detail: 'Traffic: client → leaf → GPU (north-south) · Spine mostly idle',
+    moreInfo: '<h3>What happens</h3><p>Trained models are deployed for inference — processing user requests in real time. Each GPU loads the model and handles requests independently. A load balancer distributes incoming queries across available GPUs.</p><h3>Network pattern</h3><p>Traffic is strictly north-south: requests arrive from clients, flow through leaf switches to GPUs, and responses return the same path. There is no GPU-to-GPU communication — the spine fabric is mostly idle.</p><h3>Key differences from training</h3><ul><li>Much lower GPU utilization (30-60% typical vs 85-95% training)</li><li>Latency-sensitive rather than throughput-sensitive</li><li>GPUs can be idle between requests</li><li>No synchronization between GPUs</li><li>Can use a mix of GPU types and sizes</li></ul>',
+  },
+  'tech-ecmp': {
+    heading: 'STATIC ECMP',
+    color: '#ff6e40',
+    desc: 'Standard Equal-Cost Multi-Path uses a hash of packet headers to pick a spine path. With RoCEv2 traffic, all GPU flows share the same UDP port (4791) — the hash has very low entropy, causing multiple flows to land on the same spine while others sit idle.',
+    detail: 'Problem: hash polarisation · One spine overloaded, others underutilised',
+    moreInfo: '<h3>How it works</h3><p>ECMP uses a deterministic hash function over packet header fields (source IP, destination IP, protocol, L4 ports) to select one of several equal-cost paths. Every packet of the same flow always takes the same path, preserving packet ordering.</p><h3>The AI problem</h3><p>RoCEv2 GPU traffic has very low entropy in packet headers — all flows use the same UDP destination port (4791) and GPUs burst simultaneously during all-reduce. The hash function maps multiple large flows to the same spine path while other paths sit idle.</p><h3>Configuration</h3><p><code>ip hardware fib load-balance distribution hash</code></p><h3>Limitations</h3><ul><li>No awareness of actual link utilization</li><li>Hash collisions cause persistent imbalance</li><li>Cannot react to congestion or link failures until routing converges</li></ul>',
+  },
+  'tech-dlb': {
+    heading: 'DYNAMIC LOAD BALANCING',
+    color: '#00e676',
+    desc: 'DLB monitors real-time port utilization in hardware (every 16µs) and reassigns flows to the least-loaded spine path. Unlike static ECMP, it adapts to actual traffic — but it only sees local egress ports, not downstream contention.',
+    detail: 'Fix: hardware port-quality sampling · Flows migrate to least-loaded path',
+    moreInfo: '<h3>How it works</h3><p>DLB is a hardware-assisted mechanism that samples each ECMP member\'s transmit load and queue depth every 16µs. When a new flow arrives, it is assigned to the least-loaded member. Inactive flows can be reassigned to better paths.</p><h3>Modes</h3><ul><li><strong>Optimal Timer</strong> (default) — reassigns flows after an inactivity threshold (50µs)</li><li><strong>Optimal Always</strong> — always picks the best member per-packet (may reorder)</li><li><strong>Selective DLB</strong> — apply DLB only to specific traffic (e.g., RoCEv2 via ACL)</li></ul><h3>Configuration</h3><p><code>ip hardware fib load-balance distribution dynamic</code></p><h3>Limitation</h3><p>DLB only sees local egress port load — it cannot detect downstream contention at the remote leaf switch. Two leaves may independently assign flows to the same spine, oversubscribing the spine-to-destination downlink. This is what CLB solves.</p><h3>Platform support</h3><p>Tomahawk 2 through Tomahawk 6, Trident 3/4</p>',
+  },
+  'tech-clb': {
+    heading: 'CLUSTER LOAD BALANCING',
+    color: '#4dd0e1',
+    desc: 'CLB solves what DLB cannot: downstream contention. It snoops RoCEv2 flows at the leaf switch and round-robins them across spine uplinks, ensuring no two flows from different leaves converge on the same spine-to-destination downlink.',
+    detail: 'Fix: per-flow round-robin at leaf · Prevents remote downlink contention',
+    moreInfo: '<h3>The problem CLB solves</h3><p>When GPU-A on Leaf-1 and GPU-B on Leaf-2 both send to GPU-C on Leaf-3, they each independently choose a spine. If both pick the same spine, the spine→Leaf-3 downlink is oversubscribed while other spine→Leaf-3 links sit idle. DLB cannot prevent this because each leaf only sees its own egress load.</p><h3>How CLB works</h3><ol><li><strong>Flow snooping</strong> — CLB monitors RoCEv2 traffic (UDP port 4791) and learns flows by their Queue Pair (QP) identifier</li><li><strong>Classification</strong> — Flows are classified as intra-leaf (local) or inter-leaf (needs spine)</li><li><strong>Round-robin assignment</strong> — Inter-leaf flows are distributed evenly across all spine uplinks</li><li><strong>Hardware offload</strong> — Forwarding rules are programmed into hardware for line-rate operation</li></ol><h3>CLB for Spine</h3><p>Extends CLB to spine switches, using port-index-based forwarding to maintain symmetric paths. Requires BGP Add-Path for reconvergence during link failures.</p><h3>Configuration</h3><p><code>load-balance cluster</code><br><code>&nbsp;&nbsp;forwarding type routed</code><br><code>&nbsp;&nbsp;load-balance method flow round-robin</code></p>',
+  },
+  'tech-pfc': {
+    heading: 'PRIORITY FLOW CONTROL',
+    color: '#f44336',
+    desc: 'PFC is the lossless safety net. When a switch queue fills, it sends a pause frame upstream to stop traffic on that priority. This prevents drops but can cascade backward through the fabric — a "PFC storm" from one bad NIC can stall the entire cluster.',
+    detail: 'Mechanism: hop-by-hop backpressure · Risk: head-of-line blocking cascade',
+    moreInfo: '<h3>How PFC works</h3><p>PFC (IEEE 802.1Qbb) provides hop-by-hop flow control per traffic class. When a switch\'s receive buffer for a priority class approaches its threshold, it sends a PFC pause frame upstream. The upstream device stops transmitting on that priority while continuing other priorities.</p><h3>Why AI needs lossless Ethernet</h3><p>RDMA (RoCEv2) requires reliable, in-order delivery. Any packet drop forces expensive transport-layer retransmission, stalling the entire collective operation across thousands of GPUs.</p><h3>PFC storms</h3><p>A malfunctioning NIC that continuously triggers pause frames can cascade backpressure through the entire fabric — a "PFC storm". One bad port can stall traffic across many unrelated flows.</p><h3>PFC Watchdog</h3><p>Detects storms by monitoring three conditions: pause frames received, no XOFF→XON transitions, and non-empty egress queue. Actions: <code>drop</code> (recommended), <code>error-disable</code>, or <code>notify-only</code>.</p><h3>Relationship to ECN</h3><p>ECN thresholds are set <em>below</em> PFC thresholds, creating a window where ECN can reduce sending rates before PFC must intervene. ECN is the first line of defense; PFC is the safety net.</p>',
+  },
+  'tech-ecn': {
+    heading: 'EXPLICIT CONGESTION NOTIFICATION',
+    color: '#ffd740',
+    desc: 'ECN marks packets when queue depth exceeds a threshold — instead of dropping them. The receiver sends a CNP (Congestion Notification Packet) back, and the sender\'s DCQCN algorithm reduces its rate. ECN is the first line of defense, acting before PFC needs to trigger.',
+    detail: 'Mechanism: mark at switch → CNP from receiver → sender slows down',
+    moreInfo: '<h3>How ECN works</h3><p>ECN uses 2 bits in the IP header. When an ECN-capable packet traverses a queue exceeding the WRED threshold, the switch marks it as "Congestion Experienced" (CE) instead of dropping it.</p><h3>End-to-end flow</h3><ol><li>Switch detects queue depth exceeding threshold</li><li>Switch marks packet\'s ECN field to CE (11)</li><li>Receiver NIC detects CE-marked packet</li><li>Receiver generates a CNP (Congestion Notification Packet) back to sender</li><li>Sender\'s DCQCN algorithm reduces injection rate for that QP</li></ol><h3>Dynamic ECN (D-ECN)</h3><p>Adjusts the marking threshold based on available shared buffer space rather than using fixed thresholds. Critical for AI workloads where bursty collectives create rapidly changing congestion.</p><h3>Configuration</h3><p><code>uc-tx-queue 3</code><br><code>&nbsp;&nbsp;random-detect ecn minimum-threshold 100 kbytes maximum-threshold 200 kbytes</code></p>',
+  },
+  'tech-uec': {
+    heading: 'ULTRA ETHERNET CONSORTIUM',
+    color: '#e040fb',
+    desc: 'UEC is building Ethernet-native transport for AI. Key innovation: packet trimming — instead of dropping a congested packet, the switch trims it and forwards just the header. The receiver knows exactly which data was lost, enabling faster retransmission than traditional ECN.',
+    detail: 'Packet trimming: trim instead of drop · Receiver gets precise loss info',
+    moreInfo: '<h3>What is UEC</h3><p>The Ultra Ethernet Consortium is an industry group under the Linux Foundation, formed in 2023. Members include major networking, semiconductor, and cloud companies including Arista. Its goal: make Ethernet a first-class fabric for AI/ML training.</p><h3>Packet trimming</h3><p>The key UEC innovation. When a switch encounters congestion and would normally drop a packet, it instead trims the packet — forwarding just the header to the receiver. This gives the receiver precise information about which packets were lost, enabling:</p><ul><li>Faster retransmission (receiver knows exactly what\'s missing)</li><li>Better congestion signaling than ECN (signals actual drops, not potential)</li><li>Reduced PFC dependency</li></ul><h3>UEC Transport Protocol</h3><p>UEC is defining a new transport protocol (UET) purpose-built for AI fabrics with sender-based congestion control (NSCC), support for both trimmed and untrimmed flows, and integration with existing RDMA semantics.</p><h3>Arista support</h3><p>Packet trimming implemented on Tomahawk 5, TH5-512, Jericho 3 platforms. Available from EOS 4.35.0F on DCS-7060X6.</p>',
+  },
+  'tech-nccl-ring': {
+    heading: 'NCCL · RING ALL-REDUCE',
+    color: '#00e676',
+    desc: 'NCCL links GPUs into a unidirectional ring: GPU-0→1→2→...→N→0. Each GPU sends its gradient shard to the next, receiving from the previous. Data circulates until every GPU has the complete averaged result. Bandwidth-optimal for large messages.',
+    detail: 'Pattern: unidirectional ring · Each hop crosses leaf → spine → leaf',
+    moreInfo: '<h3>NCCL (NVIDIA Collective Communications Library)</h3><p>NCCL is NVIDIA\'s library for GPU-to-GPU communication in distributed training. AMD\'s equivalent is RCCL (ROCm Communication Collectives Library). Together referred to as *CCL.</p><h3>Ring algorithm</h3><p>GPUs are linked in a unidirectional ring: 0→1→2→...→N→0. The all-reduce is decomposed into two phases:</p><ol><li><strong>Reduce-scatter</strong> — each GPU sends one shard to the next, accumulating partial results around the ring</li><li><strong>All-gather</strong> — the final results are propagated around the ring so every GPU has the complete average</li></ol><h3>Channels and rails</h3><p>NCCL creates multiple parallel channels, each running on a different NIC (rail). In a RAIL-optimized topology, each channel\'s inter-node traffic stays within a single leaf switch\'s domain.</p><h3>Network mapping</h3><ul><li>Intra-server: NVLink/NVSwitch (invisible to network)</li><li>Same-leaf: switched locally at the leaf</li><li>Cross-leaf: traverses leaf → spine → leaf (3 hops)</li></ul><h3>When to use</h3><p>Bandwidth-optimal for large messages. The ring requires N-1 steps for N GPUs, so it\'s less efficient for small messages where tree is preferred.</p>',
+  },
+  'tech-nccl-tree': {
+    heading: 'NCCL · TREE ALL-REDUCE',
+    color: '#4dd0e1',
+    desc: 'GPUs form a binary tree. In the reduce phase, children send to parents (many-to-one convergence). The root holds the result. In the broadcast phase, the root fans out to all children. Latency-optimal for small messages (logarithmic depth vs linear ring).',
+    detail: 'Pattern: reduce up → broadcast down · Convergence risk at root',
+    moreInfo: '<h3>Tree algorithm</h3><p>GPUs are arranged into two logical binary trees (double binary tree), each tree handling half the data. This provides both latency reduction and bandwidth utilization.</p><h3>Two phases</h3><ol><li><strong>Reduce phase (↑)</strong> — Each GPU sends data to its parent. The parent merges data from both children with its own (3-way merge). This repeats up to the root. Creates many-to-one convergence patterns on the network.</li><li><strong>Broadcast phase (↓)</strong> — The root sends the final result to both children. Each node forwards to its children. Creates one-to-many fan-out patterns.</li></ol><h3>Network considerations</h3><ul><li>Reduce phase concentrates traffic toward root nodes — risk of spine link hotspots</li><li>Tree depth is logarithmic (log₂N) vs ring\'s linear N — much faster for small messages</li><li>NCCL dynamically selects ring vs tree based on message size and measured bandwidth</li></ul><h3>When to use</h3><p>Latency-optimal for small messages where the O(log N) depth advantage outweighs the ring\'s better bandwidth utilization.</p>',
+  },
+  'tech-mrc': {
+    heading: 'MRC · MULTIPATH RELIABLE CONNECTION',
+    color: '#e040fb',
+    desc: 'OCP spec from AMD, Broadcom, Intel, Microsoft, NVIDIA & OpenAI. Extends RC transport so a single QP sprays packets across all paths using entropy values (EVs). The receiver tracks out-of-order arrivals via a bitmap and sends SACKs. Supports ECMP, Structured EV (source-routed), and SRv6 forwarding models — over standard best-effort Ethernet.',
+    detail: 'Per-packet spray · Receiver OOO bitmap + SACKs · NSCC congestion control',
+    moreInfo: '<h3>OCP MRC Specification 1.0 (March 2026)</h3><p>Joint contribution from AMD, Broadcom, Intel, Microsoft, NVIDIA, and OpenAI to the Open Compute Project.</p><h3>What MRC solves</h3><p>Standard RDMA Reliable Connection (RC) pins each Queue Pair to a single ECMP path. MRC extends RC so a single QP sprays packets across <em>all</em> available paths simultaneously, achieving full bisection bandwidth without multiple QPs per peer.</p><h3>Key mechanisms</h3><ul><li><strong>Entropy Values (EVs)</strong> — each packet gets a different EV (via UDP source port, Structured EV, or SRv6) to select different network paths</li><li><strong>Receiver OOO tracking</strong> — 128-packet bitmap tracks out-of-order arrivals, direct-places payloads into memory</li><li><strong>Reliability SACKs</strong> — selective acknowledgments separate from RDMA transport ACKs, with congestion state</li><li><strong>NSCC congestion control</strong> — UltraEthernet sender-based algorithm using RTT + ECN signals</li><li><strong>Path health probing</strong> — EV Probes and Reliability Probes detect failed/congested paths</li></ul><h3>Forwarding models</h3><ul><li><strong>ECMP</strong> — hash-based, standard switches</li><li><strong>Structured EV</strong> — NIC encodes path in flow label + UDP source port, switches use ACLs</li><li><strong>SRv6</strong> — Segment Routing over IPv6 with uSID containers</li></ul><h3>Operations supported</h3><p>RDMA Write and Write-with-Immediate only. Read, Send, and Atomic are not supported. Runs over standard best-effort Ethernet — no lossless fabric required.</p>',
+  },
+  'tech-radix': {
+    heading: 'SWITCH RADIX',
+    color: '#80deea',
+    desc: 'Radix is the number of ports on a switch. A radix-64 switch uses 32 ports for servers and 32 for spine uplinks. Higher radix = more GPUs per leaf = fewer tiers needed. A radix-128 switch can connect 1,024 GPUs in a 2-tier fabric without a super-spine layer.',
+    detail: 'Scale: (radix/2)² × GPUs-per-server in a 2-tier fabric',
+    moreInfo: '<h3>What is radix</h3><p>Radix is simply the total number of ports on a switch. A radix-64 switch has 64 ports. In a leaf-spine topology, these ports are split between server-facing downlinks and spine-facing uplinks.</p><h3>1:1 oversubscription (non-blocking)</h3><p>For AI training fabrics, the split must be equal: half the ports face servers, half face spines. This ensures every GPU can communicate at full line rate through the spine — no bandwidth bottleneck. This is called a 1:1 or non-blocking fabric.</p><h3>Scale formula</h3><p>For a 2-tier Clos fabric with radix-R switches:<br><code>Max GPUs = (R/2) × (R/2) × GPUs-per-server</code></p><ul><li>Radix-64: 32 × 32 × 8 = <strong>8,192 GPUs</strong></li><li>Radix-128: 64 × 64 × 8 = <strong>32,768 GPUs</strong></li></ul><h3>Why radix matters for AI</h3><p>Higher radix means more GPUs in a 2-tier fabric before needing a 3rd tier (super-spine). Each additional tier adds latency, cost, and cabling complexity — all critical for all-reduce performance.</p><h3>Arista platforms</h3><ul><li>DCS-7060X6 (64 ports, 800G)</li><li>DCS-7060DX5 (32/64 ports, 400G/800G)</li><li>7280R3/R4, 7500R3, 7800R3/R4 (high-radix modular spine)</li></ul>',
   },
 };
 
@@ -1066,10 +1242,30 @@ function showPhaseByIndex(idx) {
   if (phaseInfoPinned) forcePhase(key);
 }
 
+function setTrainingBase() {
+  workloadMode = 'training';
+  trainingPhase = 'compute';
+  trainingPhaseTimer = 0;
+  straggler = null;
+  checkpointState = 'none';
+  document.querySelectorAll('[data-workload]').forEach(b =>
+    b.classList.toggle('active', b.dataset.workload === 'training'));
+  for (const gpu of topology.gpus) {
+    gpu.state = 'active';
+    gpu.util = 70 + Math.random() * 25;
+    gpu.temp = 65 + Math.random() * 15;
+  }
+}
+
 function forcePhase(key) {
   if (!topology) return;
   straggler = null;
   checkpointState = 'none';
+  activeScenario = key.startsWith('tech-') ? key : null;
+  scenarioState = {};
+
+  const statPhase = document.getElementById('stat-phase');
+  const statusText = document.getElementById('status-text');
 
   if (key === 'inference') {
     workloadMode = 'inference';
@@ -1083,14 +1279,13 @@ function forcePhase(key) {
         : gpu.state === 'peak' ? 80 + Math.random() * 20
         : 30 + Math.random() * 40;
     }
-    document.getElementById('status-text').textContent = 'SERVING REQUESTS';
-    document.getElementById('stat-phase').textContent = 'INFERENCE';
-    document.getElementById('stat-phase').style.color = '#4dd0e1';
+    statusText.textContent = 'SERVING REQUESTS';
+    statPhase.textContent = 'INFERENCE';
+    statPhase.style.color = '#4dd0e1';
     initParticles();
     return;
   }
 
-  // All training phases
   workloadMode = 'training';
   document.querySelectorAll('[data-workload]').forEach(b =>
     b.classList.toggle('active', b.dataset.workload === 'training'));
@@ -1103,9 +1298,9 @@ function forcePhase(key) {
       gpu.util = 75 + Math.random() * 25;
       gpu.temp = 70 + Math.random() * 18;
     }
-    document.getElementById('status-text').textContent = 'COMPUTE IN PROGRESS';
-    document.getElementById('stat-phase').textContent = 'COMPUTE';
-    document.getElementById('stat-phase').style.color = '#ffd740';
+    statusText.textContent = 'COMPUTE IN PROGRESS';
+    statPhase.textContent = 'COMPUTE';
+    statPhase.style.color = '#ffd740';
     initParticles();
   } else if (key === 'training-allreduce') {
     trainingPhase = 'allreduce';
@@ -1117,9 +1312,9 @@ function forcePhase(key) {
     }
     initParticles();
     floodSpineParticles();
-    document.getElementById('status-text').textContent = 'ALL-REDUCE IN PROGRESS';
-    document.getElementById('stat-phase').textContent = 'ALL-REDUCE';
-    document.getElementById('stat-phase').style.color = '#00e676';
+    statusText.textContent = 'ALL-REDUCE IN PROGRESS';
+    statPhase.textContent = 'ALL-REDUCE';
+    statPhase.style.color = '#00e676';
   } else if (key === 'training-straggler') {
     trainingPhase = 'allreduce';
     trainingPhaseTimer = 0;
@@ -1135,9 +1330,9 @@ function forcePhase(key) {
     straggler = { gpuIdx: idx, startTime: performance.now(), duration: Infinity };
     clearSpriteCache();
     initParticles();
-    document.getElementById('status-text').textContent = 'STRAGGLER DETECTED — CLUSTER WAITING';
-    document.getElementById('stat-phase').textContent = 'STRAGGLER';
-    document.getElementById('stat-phase').style.color = '#f44336';
+    statusText.textContent = 'STRAGGLER DETECTED — CLUSTER WAITING';
+    statPhase.textContent = 'STRAGGLER';
+    statPhase.style.color = '#f44336';
   } else if (key === 'training-checkpoint') {
     trainingPhase = 'compute';
     trainingPhaseTimer = 0;
@@ -1149,10 +1344,181 @@ function forcePhase(key) {
     }
     drainSpineParticles();
     initParticles();
-    document.getElementById('status-text').textContent = 'CHECKPOINT — SAVING MODEL STATE';
-    document.getElementById('stat-phase').textContent = 'CHECKPOINT';
-    document.getElementById('stat-phase').style.color = '#ffc107';
+    statusText.textContent = 'CHECKPOINT — SAVING MODEL STATE';
+    statPhase.textContent = 'CHECKPOINT';
+    statPhase.style.color = '#ffc107';
+
+  // ── Technology Scenarios ──
+
+  } else if (key === 'tech-ecmp') {
+    setTrainingBase();
+    // Overload spine-0: all particles biased to first spine
+    scenarioState.hotSpine = 0;
+    initParticles();
+    // Bias particles to spine-0 links
+    for (const p of particles) {
+      if (p.link.type === 'spine-leaf' && p.link.from.id !== 'spine-0') {
+        p.speed = Math.sign(p.speed) * 0.001;
+        p.size = 0.6;
+        p.color = '#546e7a';
+      }
+    }
+    // Add extra particles on spine-0
+    for (const link of topology.spineLeafLinks) {
+      if (link.from.id === 'spine-0' && !isLinkFailed(link)) {
+        for (let i = 0; i < 6; i++) {
+          const p = createParticle(link);
+          p.color = '#ff6e40';
+          p.size = 2.5;
+          particles.push(p);
+        }
+      }
+    }
+    statusText.textContent = 'STATIC ECMP — HASH POLARISATION';
+    statPhase.textContent = 'ECMP';
+    statPhase.style.color = '#ff6e40';
+
+  } else if (key === 'tech-dlb') {
+    setTrainingBase();
+    scenarioState.balanced = true;
+    initParticles();
+    // Even distribution across all spines — bright, uniform
+    for (const p of particles) {
+      if (p.link.type === 'spine-leaf') {
+        p.color = '#00e676';
+        p.size = 2.2;
+        p.speed = Math.sign(p.speed) * CONFIG.particleSpeed.max * 0.8;
+      }
+    }
+    statusText.textContent = 'DLB — TRAFFIC BALANCED ACROSS SPINES';
+    statPhase.textContent = 'DLB';
+    statPhase.style.color = '#00e676';
+
+  } else if (key === 'tech-clb') {
+    setTrainingBase();
+    // Show two source leaves sending to one destination leaf through different spines
+    scenarioState.srcLeaves = [0, 1];
+    scenarioState.dstLeaf = topology.leafCount - 1;
+    initParticles();
+    // Highlight flows from src leaves through different spines to dst leaf
+    const spineCount = topology.spineCount;
+    for (const link of topology.spineLeafLinks) {
+      const spineIdx = parseInt(link.from.id.split('-')[1]);
+      const leafIdx = parseInt(link.to.id.split('-')[1]);
+      const isSrc = scenarioState.srcLeaves.includes(leafIdx);
+      const isDst = leafIdx === scenarioState.dstLeaf;
+      if (isSrc || isDst) {
+        for (let i = 0; i < 4; i++) {
+          const p = createParticle(link);
+          // Each source leaf gets a different spine — show CLB assignment
+          p.color = isSrc ? '#4dd0e1' : '#00e676';
+          p.size = 2.5;
+          particles.push(p);
+        }
+      }
+    }
+    statusText.textContent = 'CLB — FLOW-LEVEL SPINE ASSIGNMENT';
+    statPhase.textContent = 'CLB';
+    statPhase.style.color = '#4dd0e1';
+
+  } else if (key === 'tech-pfc') {
+    setTrainingBase();
+    // Pick a congested link — particles freeze and back up
+    const midLeaf = Math.floor(topology.leafCount / 2);
+    scenarioState.congestedLeaf = midLeaf;
+    scenarioState.freezeProgress = 0;
+    initParticles();
+    statusText.textContent = 'PFC — BACKPRESSURE CASCADE';
+    statPhase.textContent = 'PFC';
+    statPhase.style.color = '#f44336';
+
+  } else if (key === 'tech-ecn') {
+    setTrainingBase();
+    scenarioState.congestedSpine = 0;
+    scenarioState.markedParticles = new Set();
+    initParticles();
+    statusText.textContent = 'ECN — CONGESTION MARKING';
+    statPhase.textContent = 'ECN';
+    statPhase.style.color = '#ffd740';
+
+  } else if (key === 'tech-uec') {
+    setTrainingBase();
+    scenarioState.congestedSpine = 0;
+    scenarioState.trimmedParticles = new Set();
+    initParticles();
+    statusText.textContent = 'UEC — PACKET TRIMMING';
+    statPhase.textContent = 'UEC';
+    statPhase.style.color = '#e040fb';
+
+  } else if (key === 'tech-nccl-ring') {
+    setTrainingBase();
+    for (const gpu of topology.gpus) {
+      gpu.state = 'syncing';
+      gpu.util = 60 + Math.random() * 20;
+    }
+    // Build ring links between consecutive GPUs across leaves
+    scenarioState.ringLinks = [];
+    const gpus = topology.gpus;
+    for (let i = 0; i < gpus.length; i++) {
+      const next = gpus[(i + 1) % gpus.length];
+      scenarioState.ringLinks.push({ from: gpus[i], to: next });
+    }
+    initParticles();
+    statusText.textContent = 'NCCL RING ALL-REDUCE';
+    statPhase.textContent = 'RING';
+    statPhase.style.color = '#00e676';
+
+  } else if (key === 'tech-nccl-tree') {
+    setTrainingBase();
+    for (const gpu of topology.gpus) {
+      gpu.state = 'syncing';
+      gpu.util = 50 + Math.random() * 30;
+    }
+    // Build tree: root = gpu[0], children fan out
+    scenarioState.treeLinks = [];
+    const treeGpus = topology.gpus;
+    for (let i = 0; i < treeGpus.length; i++) {
+      const left = 2 * i + 1, right = 2 * i + 2;
+      if (left < treeGpus.length) scenarioState.treeLinks.push({ from: treeGpus[i], to: treeGpus[left] });
+      if (right < treeGpus.length) scenarioState.treeLinks.push({ from: treeGpus[i], to: treeGpus[right] });
+    }
+    scenarioState.phase = 'reduce'; // 'reduce' or 'broadcast'
+    scenarioState.phaseTimer = 0;
+    initParticles();
+    statusText.textContent = 'NCCL TREE ALL-REDUCE — REDUCE PHASE';
+    statPhase.textContent = 'TREE';
+    statPhase.style.color = '#4dd0e1';
+
+  } else if (key === 'tech-mrc') {
+    setTrainingBase();
+    // Pick two GPUs on different leaves — show multipath
+    scenarioState.srcGpu = topology.gpus[0];
+    scenarioState.dstGpu = topology.gpus[topology.gpus.length - 1];
+    initParticles();
+    statusText.textContent = 'MULTIPATH RDMA — MULTI-SPINE STRIPING';
+    statPhase.textContent = 'MRC';
+    statPhase.style.color = '#e040fb';
+
+  } else if (key === 'tech-radix') {
+    // Rebuild with 1:1 oversubscription (spine count = GPUs per leaf)
+    topology = buildTopology(gpuCount, CONFIG.gpusPerLeaf);
+    setTrainingBase();
+    trainingPhase = 'compute';
+    for (const gpu of topology.gpus) {
+      gpu.state = Math.random() < 0.7 ? 'active' : 'peak';
+      gpu.util = 70 + Math.random() * 30;
+    }
+    initParticles();
+    computeEcmpFlows();
+    document.getElementById('bar-leaves').textContent = topology.leafCount;
+    document.getElementById('bar-spines').textContent = topology.spineCount;
+    const gpusPerLeaf = Math.round(gpuCount / topology.leafCount);
+    statusText.textContent = `RADIX-${gpusPerLeaf + topology.spineCount} · 1:1 NON-BLOCKING`;
+    statPhase.textContent = 'RADIX';
+    statPhase.style.color = '#80deea';
   }
+
+  clearSpriteCache();
 }
 
 function updatePhaseInfo(key) {
@@ -2163,6 +2529,372 @@ function drawEcmpLabel() {
 }
 
 // ============================================================
+// Scenario Overlays
+// ============================================================
+function drawScenarioOverlay() {
+  if (!activeScenario || !topology) return;
+  const now = performance.now();
+
+  if (activeScenario === 'tech-ecmp') {
+    // Highlight overloaded spine with red glow
+    const spine = topology.spines[scenarioState.hotSpine || 0];
+    if (spine) {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 300);
+      ctx.beginPath();
+      ctx.arc(spine.x, spine.y, 40, 0, Math.PI * 2);
+      const grd = ctx.createRadialGradient(spine.x, spine.y, 10, spine.x, spine.y, 40);
+      grd.addColorStop(0, `rgba(255, 110, 64, ${0.2 + pulse * 0.15})`);
+      grd.addColorStop(1, 'transparent');
+      ctx.fillStyle = grd;
+      ctx.fill();
+      // Label
+      ctx.font = "700 9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = '#ff6e40';
+      ctx.textAlign = 'center';
+      ctx.fillText('OVERLOADED', spine.x, spine.y - 38);
+    }
+    // Dim label on other spines
+    for (let i = 1; i < topology.spines.length; i++) {
+      const s = topology.spines[i];
+      ctx.font = "600 8px 'JetBrains Mono', monospace";
+      ctx.fillStyle = 'rgba(84, 110, 122, 0.6)';
+      ctx.textAlign = 'center';
+      ctx.fillText('IDLE', s.x, s.y - 35);
+    }
+
+  } else if (activeScenario === 'tech-dlb') {
+    // Green "balanced" indicators on all spines
+    for (const spine of topology.spines) {
+      ctx.font = "600 8px 'JetBrains Mono', monospace";
+      ctx.fillStyle = '#00e676';
+      ctx.textAlign = 'center';
+      ctx.fillText('BALANCED', spine.x, spine.y - 35);
+    }
+
+  } else if (activeScenario === 'tech-clb') {
+    // Highlight source and destination leaves
+    const src = scenarioState.srcLeaves || [];
+    const dst = scenarioState.dstLeaf;
+    for (const leaf of topology.leaves) {
+      const idx = parseInt(leaf.id.split('-')[1]);
+      if (src.includes(idx)) {
+        ctx.beginPath();
+        ctx.arc(leaf.x, leaf.y, 28, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(77, 208, 225, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.font = "600 8px 'JetBrains Mono', monospace";
+        ctx.fillStyle = '#4dd0e1';
+        ctx.textAlign = 'center';
+        ctx.fillText('SOURCE', leaf.x, leaf.y + 28);
+      }
+      if (idx === dst) {
+        ctx.beginPath();
+        ctx.arc(leaf.x, leaf.y, 28, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0, 230, 118, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.font = "600 8px 'JetBrains Mono', monospace";
+        ctx.fillStyle = '#00e676';
+        ctx.textAlign = 'center';
+        ctx.fillText('DESTINATION', leaf.x, leaf.y + 28);
+      }
+    }
+
+  } else if (activeScenario === 'tech-pfc') {
+    // Show backpressure: frozen zone radiating from congested leaf
+    const leafIdx = scenarioState.congestedLeaf || 0;
+    const leaf = topology.leaves[leafIdx];
+    if (leaf) {
+      scenarioState.freezeProgress = Math.min(1, (scenarioState.freezeProgress || 0) + 0.002);
+      const fp = scenarioState.freezeProgress;
+      const pulse = 0.5 + 0.5 * Math.sin(now / 200);
+
+      // Red congestion zone around the leaf
+      ctx.beginPath();
+      ctx.arc(leaf.x, leaf.y, 30 + fp * 30, 0, Math.PI * 2);
+      const grd = ctx.createRadialGradient(leaf.x, leaf.y, 5, leaf.x, leaf.y, 30 + fp * 30);
+      grd.addColorStop(0, `rgba(244, 67, 54, ${0.15 + pulse * 0.1})`);
+      grd.addColorStop(1, 'transparent');
+      ctx.fillStyle = grd;
+      ctx.fill();
+
+      ctx.font = "700 9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = '#f44336';
+      ctx.textAlign = 'center';
+      ctx.fillText('CONGESTED', leaf.x, leaf.y - 28);
+      ctx.font = "500 8px 'JetBrains Mono', monospace";
+      ctx.fillText('PFC PAUSE →', leaf.x, leaf.y + 28);
+
+      // Freeze particles near this leaf
+      for (const p of particles) {
+        if (p.link.type === 'spine-leaf' && p.link.to.id === leaf.id) {
+          if (p.t > 0.5) { p.speed = 0; p.color = '#f44336'; p.size = 2.5; }
+        }
+        // Cascade: also freeze upstream spine links
+        if (p.link.type === 'spine-leaf' && p.link.to.id === leaf.id && fp > 0.5) {
+          p.speed = 0; p.color = '#f44336';
+        }
+      }
+    }
+
+  } else if (activeScenario === 'tech-ecn') {
+    // Mark particles passing through congested spine
+    const spineId = 'spine-' + (scenarioState.congestedSpine || 0);
+    const spine = topology.spines[scenarioState.congestedSpine || 0];
+    if (spine) {
+      // Congestion indicator on spine
+      const pulse = 0.5 + 0.5 * Math.sin(now / 400);
+      ctx.font = "700 9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = `rgba(255, 215, 64, ${0.6 + pulse * 0.4})`;
+      ctx.textAlign = 'center';
+      ctx.fillText('ECN MARKING', spine.x, spine.y - 38);
+
+      // Mark particles passing through this spine — turn amber
+      for (const p of particles) {
+        if (p.link.type === 'spine-leaf' && p.link.from.id === spineId) {
+          if (p.t > 0.3 && p.t < 0.7) {
+            p.color = '#ffd740'; // Marked
+            p.size = 2.8;
+          }
+        }
+      }
+
+      // Show CNP response arrow
+      ctx.strokeStyle = 'rgba(255, 215, 64, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      for (const link of topology.spineLeafLinks) {
+        if (link.from.id === spineId) {
+          const mx = (link.from.x + link.to.x) / 2;
+          const my = (link.from.y + link.to.y) / 2;
+          ctx.font = "500 7px 'JetBrains Mono', monospace";
+          ctx.fillStyle = 'rgba(255, 215, 64, 0.5)';
+          ctx.fillText('CE', mx + 8, my);
+        }
+      }
+      ctx.setLineDash([]);
+    }
+
+  } else if (activeScenario === 'tech-uec') {
+    // Packet trimming: some particles shrink instead of disappearing
+    const spineId = 'spine-' + (scenarioState.congestedSpine || 0);
+    const spine = topology.spines[scenarioState.congestedSpine || 0];
+    if (spine) {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 350);
+      ctx.font = "700 9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = `rgba(224, 64, 251, ${0.6 + pulse * 0.4})`;
+      ctx.textAlign = 'center';
+      ctx.fillText('TRIMMING', spine.x, spine.y - 38);
+
+      for (const p of particles) {
+        if (p.link.type === 'spine-leaf' && p.link.from.id === spineId) {
+          // Some get trimmed (shrunk), others pass through
+          if (p.t > 0.4 && p.t < 0.6 && Math.sin(p.t * 50 + now / 200) > 0.3) {
+            p.color = '#e040fb';
+            p.size = 0.8; // Trimmed — header only
+          }
+        }
+      }
+
+      ctx.font = "500 7px 'JetBrains Mono', monospace";
+      ctx.fillStyle = 'rgba(224, 64, 251, 0.4)';
+      for (const link of topology.spineLeafLinks) {
+        if (link.from.id === spineId) {
+          const mx = (link.from.x + link.to.x) / 2;
+          const my = (link.from.y + link.to.y) / 2;
+          ctx.fillText('TRIM', mx + 8, my);
+        }
+      }
+    }
+
+  } else if (activeScenario === 'tech-nccl-ring') {
+    // Draw ring links between GPUs
+    const ringLinks = scenarioState.ringLinks;
+    if (!ringLinks) return;
+    const maxDraw = Math.min(ringLinks.length, 64); // limit for performance
+    ctx.strokeStyle = 'rgba(0, 230, 118, 0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < maxDraw; i++) {
+      const rl = ringLinks[i];
+      ctx.moveTo(rl.from.x, rl.from.y);
+      ctx.lineTo(rl.to.x, rl.to.y);
+    }
+    ctx.stroke();
+
+    // Animated ring particles
+    const ringT = (now / 3000) % 1;
+    ctx.fillStyle = '#00e676';
+    ctx.shadowColor = '#00e676';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    for (let i = 0; i < maxDraw; i++) {
+      const rl = ringLinks[i];
+      const t = (ringT + i / maxDraw) % 1;
+      const x = rl.from.x + (rl.to.x - rl.from.x) * t;
+      const y = rl.from.y + (rl.to.y - rl.from.y) * t;
+      ctx.moveTo(x + 3, y);
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Direction arrow at root
+    const root = topology.gpus[0];
+    ctx.font = "600 8px 'JetBrains Mono', monospace";
+    ctx.fillStyle = '#00e676';
+    ctx.textAlign = 'center';
+    ctx.fillText('RING START →', root.x, root.y - 16);
+
+  } else if (activeScenario === 'tech-nccl-tree') {
+    // Draw tree links
+    const treeLinks = scenarioState.treeLinks;
+    if (!treeLinks) return;
+    const maxDraw = Math.min(treeLinks.length, 64);
+    const isReduce = scenarioState.phase === 'reduce';
+
+    // Alternate phase every 4 seconds
+    scenarioState.phaseTimer = (scenarioState.phaseTimer || 0) + 1;
+    if (scenarioState.phaseTimer > 240) {
+      scenarioState.phaseTimer = 0;
+      scenarioState.phase = isReduce ? 'broadcast' : 'reduce';
+      document.getElementById('status-text').textContent =
+        scenarioState.phase === 'reduce' ? 'NCCL TREE — REDUCE PHASE (↑)' : 'NCCL TREE — BROADCAST PHASE (↓)';
+    }
+
+    ctx.strokeStyle = isReduce ? 'rgba(77, 208, 225, 0.2)' : 'rgba(0, 230, 118, 0.2)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let i = 0; i < maxDraw; i++) {
+      const tl = treeLinks[i];
+      ctx.moveTo(tl.from.x, tl.from.y);
+      ctx.lineTo(tl.to.x, tl.to.y);
+    }
+    ctx.stroke();
+
+    // Animated tree particles — direction depends on phase
+    const treeT = (now / 2500) % 1;
+    const color = isReduce ? '#4dd0e1' : '#00e676';
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    for (let i = 0; i < maxDraw; i++) {
+      const tl = treeLinks[i];
+      const t = isReduce ? (1 - ((treeT + i / maxDraw) % 1)) : ((treeT + i / maxDraw) % 1);
+      const x = tl.from.x + (tl.to.x - tl.from.x) * t;
+      const y = tl.from.y + (tl.to.y - tl.from.y) * t;
+      ctx.moveTo(x + 2.5, y);
+      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Root label
+    const root = topology.gpus[0];
+    ctx.font = "600 8px 'JetBrains Mono', monospace";
+    ctx.fillStyle = '#4dd0e1';
+    ctx.textAlign = 'center';
+    ctx.fillText('ROOT', root.x, root.y - 16);
+
+  } else if (activeScenario === 'tech-mrc') {
+    // Draw multipath: one GPU pair using all spine paths
+    const src = scenarioState.srcGpu;
+    const dst = scenarioState.dstGpu;
+    if (!src || !dst) return;
+    const srcLeaf = topology.leaves[src.leafIdx];
+    const dstLeaf = topology.leaves[dst.leafIdx];
+
+    // Highlight src and dst GPUs
+    for (const gpu of [src, dst]) {
+      ctx.beginPath();
+      ctx.arc(gpu.x, gpu.y, 14, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(224, 64, 251, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.font = "600 8px 'JetBrains Mono', monospace";
+    ctx.fillStyle = '#e040fb';
+    ctx.textAlign = 'center';
+    ctx.fillText('SRC', src.x, src.y - 14);
+    ctx.fillText('DST', dst.x, dst.y - 14);
+
+    // Draw all spine paths with animated particles
+    const pathT = (now / 2000) % 1;
+    for (let si = 0; si < topology.spines.length; si++) {
+      const spine = topology.spines[si];
+      if (failedSpines.has(spine.id)) continue;
+
+      // src → srcLeaf → spine → dstLeaf → dst
+      const pathColor = `hsla(${280 + si * 30}, 80%, 65%, 0.35)`;
+      ctx.strokeStyle = pathColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(src.x, src.y);
+      ctx.lineTo(srcLeaf.x, srcLeaf.y);
+      ctx.lineTo(spine.x, spine.y);
+      ctx.lineTo(dstLeaf.x, dstLeaf.y);
+      ctx.lineTo(dst.x, dst.y);
+      ctx.stroke();
+
+      // Particle along the full path
+      const segments = [
+        { x0: src.x, y0: src.y, x1: srcLeaf.x, y1: srcLeaf.y },
+        { x0: srcLeaf.x, y0: srcLeaf.y, x1: spine.x, y1: spine.y },
+        { x0: spine.x, y0: spine.y, x1: dstLeaf.x, y1: dstLeaf.y },
+        { x0: dstLeaf.x, y0: dstLeaf.y, x1: dst.x, y1: dst.y },
+      ];
+      const t = (pathT + si * 0.15) % 1;
+      const totalSeg = segments.length;
+      const segIdx = Math.min(Math.floor(t * totalSeg), totalSeg - 1);
+      const segT = (t * totalSeg) - segIdx;
+      const seg = segments[segIdx];
+      const px = seg.x0 + (seg.x1 - seg.x0) * segT;
+      const py = seg.y0 + (seg.y1 - seg.y0) * segT;
+
+      ctx.fillStyle = `hsla(${280 + si * 30}, 80%, 65%, 0.9)`;
+      ctx.shadowColor = `hsla(${280 + si * 30}, 80%, 65%, 0.8)`;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+  } else if (activeScenario === 'tech-radix') {
+    // Label spine and leaf port counts
+    const leafR = gpuCount > 256 ? 14 : gpuCount > 128 ? 16 : 18;
+    const radix = topology.spineCount + (topology.gpus.length / topology.leafCount);
+    for (const leaf of topology.leaves) {
+      const downlinks = leaf.gpus.length;
+      const uplinks = topology.spineCount;
+      ctx.font = "500 8px 'JetBrains Mono', monospace";
+      ctx.fillStyle = 'rgba(128, 222, 234, 0.5)';
+      ctx.textAlign = 'center';
+      const ratio = downlinks === uplinks ? '1:1' : `${downlinks}:${uplinks}`;
+      ctx.fillText(`↓${downlinks} srv  ↑${uplinks} spine · ${ratio} · radix-${downlinks + uplinks}`, leaf.x, leaf.y + leafR + 12);
+    }
+    for (const spine of topology.spines) {
+      ctx.font = "500 8px 'JetBrains Mono', monospace";
+      ctx.fillStyle = 'rgba(128, 222, 234, 0.5)';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${topology.leafCount} leaf ports`, spine.x, spine.y - 38);
+    }
+    // Total scale label
+    const cx = canvas.width / dpr / 2;
+    ctx.font = "600 11px 'JetBrains Mono', monospace";
+    ctx.fillStyle = 'rgba(128, 222, 234, 0.4)';
+    ctx.textAlign = 'center';
+    const gpusPerLeaf = Math.round(topology.gpus.length / topology.leafCount);
+    ctx.fillText(
+      `${gpuCount} GPUs · ${topology.leafCount} leaves (radix-${gpusPerLeaf + topology.spineCount}) · ${topology.spineCount} spines · 2-tier Clos`,
+      cx, topology.tierYs.gpuBot + 40
+    );
+  }
+}
+
+// ============================================================
 // Main Loop
 // ============================================================
 let lastTime = 0;
@@ -2177,6 +2909,7 @@ function animate(time) {
   drawPathTrace();
   drawParticles();
   drawNodes();
+  drawScenarioOverlay();
   drawTierLabels();
   drawLeafTooltip();
   drawEcmpLabel();
@@ -2582,6 +3315,8 @@ document.getElementById('phase-pin').addEventListener('click', () => {
   updatePinButton();
   if (!phaseInfoPinned) {
     // Resuming AUTO — reset to compute phase and let simulation cycle naturally
+    activeScenario = null;
+    scenarioState = {};
     straggler = null;
     checkpointState = 'none';
     checkpointCooldown = CHECKPOINT_INTERVAL;
@@ -2605,6 +3340,25 @@ function updatePinButton() {
   btn.textContent = phaseInfoPinned ? '📌 PINNED' : '📌 AUTO';
   btn.classList.toggle('pinned', phaseInfoPinned);
 }
+
+// More Info modal
+document.getElementById('phase-more').addEventListener('click', () => {
+  const key = PHASE_KEYS[currentPhaseIdx];
+  const info = PHASE_INFO[key];
+  if (!info) return;
+  document.getElementById('info-modal-heading').textContent = info.heading;
+  document.getElementById('info-modal-heading').style.color = info.color;
+  document.getElementById('info-modal-body').innerHTML = info.moreInfo || '<p>No additional information available.</p>';
+  document.getElementById('info-modal').classList.add('visible');
+});
+document.getElementById('info-modal-close').addEventListener('click', () => {
+  document.getElementById('info-modal').classList.remove('visible');
+});
+document.getElementById('info-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('info-modal')) {
+    document.getElementById('info-modal').classList.remove('visible');
+  }
+});
 
 // ============================================================
 // Setup & Rebuild
@@ -2661,6 +3415,7 @@ window.addEventListener('resize', () => {
 
 resize();
 setGpuCount(128);
+showPhaseByIndex(0);
 animate(0);
 </script>
 </body>
