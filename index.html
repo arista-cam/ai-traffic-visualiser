@@ -195,13 +195,19 @@
     top: 110px;
     right: 24px;
     width: 280px;
+    max-height: calc(100vh - 170px);
+    overflow-y: auto;
     background: rgba(10, 14, 23, 0.82);
     border: 1px solid rgba(100, 180, 255, 0.12);
     border-radius: 6px;
     padding: 12px 14px;
     backdrop-filter: blur(12px);
     z-index: 10;
-    transition: opacity 0.4s, border-color 0.4s;
+    transition: opacity 0.4s, border-color 0.4s, width 0.3s;
+  }
+
+  #phase-info.expanded {
+    width: 380px;
   }
 
   #phase-info .phase-heading {
@@ -230,6 +236,51 @@
     color: #5a7a9a;
     letter-spacing: 0.5px;
   }
+
+  #phase-more-content {
+    display: none;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(100, 180, 255, 0.1);
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #8a9fb5;
+  }
+
+  #phase-more-content.visible { display: block; }
+
+  #phase-more-content h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #c0d0e0;
+    margin: 12px 0 4px 0;
+    text-transform: uppercase;
+  }
+
+  #phase-more-content h3:first-child { margin-top: 0; }
+
+  #phase-more-content ul {
+    padding-left: 14px;
+    margin: 4px 0;
+  }
+
+  #phase-more-content li { margin-bottom: 4px; }
+
+  #phase-more-content code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    background: rgba(100, 180, 255, 0.06);
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #4dd0e1;
+  }
+
+  #phase-more-content p { margin: 4px 0; }
+  #phase-more-content ol { padding-left: 14px; margin: 4px 0; }
+  #phase-more-content ol li { margin-bottom: 4px; }
 
   .phase-nav {
     display: flex;
@@ -269,93 +320,6 @@
     color: #5a7a9a;
     letter-spacing: 1px;
   }
-
-  /* Info Modal */
-  #info-modal {
-    display: none;
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-    z-index: 100;
-    align-items: center;
-    justify-content: center;
-  }
-
-  #info-modal.visible {
-    display: flex;
-  }
-
-  #info-modal-inner {
-    background: rgba(10, 14, 23, 0.95);
-    border: 1px solid rgba(100, 180, 255, 0.2);
-    border-radius: 10px;
-    padding: 28px 32px;
-    max-width: 520px;
-    width: 90%;
-    max-height: 80vh;
-    overflow-y: auto;
-    backdrop-filter: blur(16px);
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
-    position: relative;
-  }
-
-  #info-modal-heading {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    margin-bottom: 16px;
-    text-transform: uppercase;
-  }
-
-  #info-modal-body {
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    line-height: 1.7;
-    color: #a0b8cc;
-  }
-
-  #info-modal-body h3 {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    color: #e0e8f0;
-    margin: 18px 0 8px 0;
-    text-transform: uppercase;
-  }
-
-  #info-modal-body ul {
-    padding-left: 18px;
-    margin: 8px 0;
-  }
-
-  #info-modal-body li {
-    margin-bottom: 6px;
-  }
-
-  #info-modal-body code {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    background: rgba(100, 180, 255, 0.08);
-    padding: 1px 5px;
-    border-radius: 3px;
-    color: #4dd0e1;
-  }
-
-  #info-modal-close {
-    position: absolute;
-    top: 14px;
-    right: 18px;
-    background: none;
-    border: none;
-    color: #5a7a9a;
-    font-size: 22px;
-    cursor: pointer;
-    line-height: 1;
-  }
-
-  #info-modal-close:hover { color: #e0e8f0; }
 
   /* Bottom Bar */
   #bottom-bar {
@@ -679,16 +643,8 @@
     <button class="phase-nav-btn" id="phase-pin" title="Pin to stop auto-switching">📌 AUTO</button>
     <button class="phase-nav-btn" id="phase-next" title="Next phase">▶</button>
   </div>
-  <button class="phase-nav-btn" id="phase-more" style="width:100%;margin-top:8px">More Info</button>
-</div>
-
-<!-- More Info Modal -->
-<div id="info-modal">
-  <div id="info-modal-inner">
-    <button id="info-modal-close">&times;</button>
-    <div id="info-modal-heading"></div>
-    <div id="info-modal-body"></div>
-  </div>
+  <button class="phase-nav-btn" id="phase-more" style="width:100%;margin-top:8px">More Info ▼</button>
+  <div id="phase-more-content"></div>
 </div>
 
 <!-- GPU Selector -->
@@ -1302,13 +1258,14 @@ const PHASE_INFO = {
     color: '#80deea',
     desc: 'Radix is the number of ports on a switch. A radix-64 switch uses 32 ports for servers and 32 for spine uplinks. Higher radix = more GPUs per leaf = fewer tiers needed. A radix-128 switch can connect 1,024 GPUs in a 2-tier fabric without a super-spine layer.',
     detail: 'Scale: (radix/2)² × GPUs-per-server in a 2-tier fabric',
-    moreInfo: '<h3>What is radix</h3><p>Radix is simply the total number of ports on a switch. A radix-64 switch has 64 ports. In a leaf-spine topology, these ports are split between server-facing downlinks and spine-facing uplinks.</p><h3>1:1 oversubscription (non-blocking)</h3><p>For AI training fabrics, the split must be equal: half the ports face servers, half face spines. This ensures every GPU can communicate at full line rate through the spine — no bandwidth bottleneck. This is called a 1:1 or non-blocking fabric.</p><h3>Scale formula</h3><p>For a 2-tier Clos fabric with radix-R switches:<br><code>Max GPUs = (R/2) × (R/2) × GPUs-per-server</code></p><ul><li>Radix-64: 32 × 32 × 8 = <strong>8,192 GPUs</strong></li><li>Radix-128: 64 × 64 × 8 = <strong>32,768 GPUs</strong></li></ul><h3>Why radix matters for AI</h3><p>Higher radix means more GPUs in a 2-tier fabric before needing a 3rd tier (super-spine). Each additional tier adds latency, cost, and cabling complexity — all critical for all-reduce performance.</p><h3>Arista platforms</h3><ul><li>DCS-7060X6 (64 ports, 800G)</li><li>DCS-7060DX5 (32/64 ports, 400G/800G)</li><li>7280R3/R4, 7500R3, 7800R3/R4 (high-radix modular spine)</li></ul>',
+    moreInfo: '<h3>What is radix</h3><p>Radix is simply the total number of ports on a switch. A radix-64 switch has 64 ports. In a leaf-spine topology, these ports are split between server-facing downlinks and spine-facing uplinks.</p><h3>1:1 oversubscription (non-blocking)</h3><p>For AI training fabrics, the split must be equal: half the ports face servers, half face spines. This ensures every GPU can communicate at full line rate through the spine — no bandwidth bottleneck. This is called a 1:1 or non-blocking fabric.</p><h3>Scale formula</h3><p>For a 2-tier Clos fabric with radix-R switches:<br><code>Max GPUs = (R/2) × (R/2) × GPUs-per-server</code></p><ul><li>Radix-64: 32 × 32 × 8 = <strong>8,192 GPUs</strong></li><li>Radix-128: 64 × 64 × 8 = <strong>32,768 GPUs</strong></li></ul><h3>Why radix matters for AI</h3><p>Higher radix means more GPUs in a 2-tier fabric before needing a 3rd tier (super-spine). Each additional tier adds latency, cost, and cabling complexity — all critical for all-reduce performance.</p><h3>Arista platforms</h3><ul><li><strong>Leaf:</strong> DCS-7060X6 (64 ports, 800G), DCS-7060DX5 (32/64 ports, 400G/800G)</li><li><strong>Fixed spine:</strong> 7280R3/R4</li><li><strong>Modular spine:</strong> 7500R3, 7800R3/R4 (high-radix chassis)</li></ul>',
   },
 };
 
 const PHASE_KEYS = Object.keys(PHASE_INFO);
 let currentPhaseIdx = 0;
 let phaseInfoPinned = false;
+let moreInfoOpen = false;
 
 function showPhaseByIndex(idx) {
   currentPhaseIdx = ((idx % PHASE_KEYS.length) + PHASE_KEYS.length) % PHASE_KEYS.length;
@@ -1320,6 +1277,11 @@ function showPhaseByIndex(idx) {
   document.getElementById('phase-detail').textContent = info.detail;
   document.getElementById('phase-info').style.borderColor = hexToRgba(info.color, 0.2);
   document.getElementById('phase-counter').textContent = `${currentPhaseIdx + 1} / ${PHASE_KEYS.length}`;
+
+  // Update inline More Info content if it's open
+  if (moreInfoOpen) {
+    document.getElementById('phase-more-content').innerHTML = info.moreInfo || '<p>No additional information available.</p>';
+  }
 
   if (phaseInfoPinned) forcePhase(key);
 }
@@ -3498,22 +3460,23 @@ function updatePinButton() {
   btn.classList.toggle('pinned', phaseInfoPinned);
 }
 
-// More Info modal
+// More Info inline toggle
 document.getElementById('phase-more').addEventListener('click', () => {
-  const key = PHASE_KEYS[currentPhaseIdx];
-  const info = PHASE_INFO[key];
-  if (!info) return;
-  document.getElementById('info-modal-heading').textContent = info.heading;
-  document.getElementById('info-modal-heading').style.color = info.color;
-  document.getElementById('info-modal-body').innerHTML = info.moreInfo || '<p>No additional information available.</p>';
-  document.getElementById('info-modal').classList.add('visible');
-});
-document.getElementById('info-modal-close').addEventListener('click', () => {
-  document.getElementById('info-modal').classList.remove('visible');
-});
-document.getElementById('info-modal').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('info-modal')) {
-    document.getElementById('info-modal').classList.remove('visible');
+  moreInfoOpen = !moreInfoOpen;
+  const content = document.getElementById('phase-more-content');
+  const btn = document.getElementById('phase-more');
+  const panel = document.getElementById('phase-info');
+  if (moreInfoOpen) {
+    const key = PHASE_KEYS[currentPhaseIdx];
+    const info = PHASE_INFO[key];
+    content.innerHTML = info && info.moreInfo ? info.moreInfo : '<p>No additional information available.</p>';
+    content.classList.add('visible');
+    panel.classList.add('expanded');
+    btn.textContent = 'Less Info ▲';
+  } else {
+    content.classList.remove('visible');
+    panel.classList.remove('expanded');
+    btn.textContent = 'More Info ▼';
   }
 });
 
