@@ -835,9 +835,10 @@ let failedLinkKeys = new Set();
 function linkKey(link) { return link.from.id + ':' + link.to.id; }
 function isLinkFailed(link) {
   if (link.type === 'spine-leaf') {
-    const fromFailed = failedSpines.has(link.from.id);
-    const toFailed = link.to.gpus ? failedLeaves.has(link.to.id) : failedSpines.has(link.to.id);
-    return fromFailed || toFailed || failedLinkKeys.has(linkKey(link));
+    return failedSpines.has(link.from.id) || failedLeaves.has(link.to.id) || failedLinkKeys.has(linkKey(link));
+  }
+  if (link.type === 'super-spine') {
+    return failedSpines.has(link.from.id) || failedSpines.has(link.to.id) || failedLinkKeys.has(linkKey(link));
   }
   if (link.type === 'leaf-gpu') {
     return failedLeaves.has(link.from.id) || failedGpus.has(link.to.id);
@@ -1054,7 +1055,7 @@ function buildTopology(count, overrideSpineCount) {
     }
     for (const ss of superSpines) {
       for (const sp of allSpines) {
-        superSpineLinks.push({ from: ss, to: sp, type: 'spine-leaf' });
+        superSpineLinks.push({ from: ss, to: sp, type: 'super-spine' });
       }
     }
   }
@@ -1997,10 +1998,10 @@ function drawLinks() {
   let hoveredLink = null;
 
   for (const link of topology.spineLeafLinks) {
+    if (link.type === 'super-spine') continue; // drawn separately
     if (isLinkFailed(link)) { failedLinks.push(link); continue; }
     if (hoverState.link === link) { hoveredLink = link; continue; }
 
-    // Super-spine→spine links don't have .gpus on the target
     if (!link.to.gpus) { normalLinks.push(link); continue; }
 
     const leaf = link.to;
@@ -2064,6 +2065,19 @@ function drawLinks() {
     ctx.beginPath();
     ctx.moveTo(hoveredLink.from.x, hoveredLink.from.y);
     ctx.lineTo(hoveredLink.to.x, hoveredLink.to.y);
+    ctx.stroke();
+  }
+
+  // Super-spine → spine links (3-tier only)
+  if (topology.superSpines && topology.superSpines.length > 0) {
+    ctx.strokeStyle = 'rgba(77, 208, 225, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const link of topology.spineLeafLinks) {
+      if (link.type !== 'super-spine') continue;
+      ctx.moveTo(link.from.x, link.from.y);
+      ctx.lineTo(link.to.x, link.to.y);
+    }
     ctx.stroke();
   }
 
