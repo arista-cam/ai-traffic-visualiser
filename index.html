@@ -2423,8 +2423,9 @@ function drawPathTrace() {
     // Find spines in the same plane as this leaf
     const leafPlane = leaf.plane;
     for (const spine of topology.spines) {
+      if (spine.label === 'SUPER') continue;
       if (failedSpines.has(spine.id)) continue;
-      if (spine.plane !== undefined && spine.plane !== -1 && spine.plane !== leafPlane) continue;
+      if (spine.plane !== undefined && spine.plane !== leafPlane) continue;
       ctx.strokeStyle = 'rgba(77, 208, 225, 0.35)';
       ctx.lineWidth = 1.8;
       ctx.beginPath();
@@ -2673,6 +2674,7 @@ function drawScenarioOverlay() {
     // Dim label on other spines
     for (let i = 1; i < topology.spines.length; i++) {
       const s = topology.spines[i];
+      if (s.label === 'SUPER') continue;
       ctx.font = "600 8px 'JetBrains Mono', monospace";
       ctx.fillStyle = 'rgba(84, 110, 122, 0.6)';
       ctx.textAlign = 'center';
@@ -2682,6 +2684,7 @@ function drawScenarioOverlay() {
   } else if (activeScenario === 'tech-dlb') {
     // Green "balanced" indicators on all spines
     for (const spine of topology.spines) {
+      if (spine.label === 'SUPER') continue;
       ctx.font = "600 8px 'JetBrains Mono', monospace";
       ctx.fillStyle = '#00e676';
       ctx.textAlign = 'center';
@@ -2937,10 +2940,11 @@ function drawScenarioOverlay() {
     ctx.fillText('SRC', src.x, src.y - 14);
     ctx.fillText('DST', dst.x, dst.y - 14);
 
-    // Draw all spine paths with animated particles
+    // Draw all spine paths with animated particles (skip super-spines)
     const pathT = (now / 2000) % 1;
     for (let si = 0; si < topology.spines.length; si++) {
       const spine = topology.spines[si];
+      if (spine.label === 'SUPER') continue;
       if (failedSpines.has(spine.id)) continue;
 
       // src → srcLeaf → spine → dstLeaf → dst
@@ -2993,6 +2997,7 @@ function drawScenarioOverlay() {
       ctx.fillText(`↓${downlinks} srv  ↑${uplinks} spine · ${ratio} · radix-${downlinks + uplinks}`, leaf.x, leaf.y + leafR + 12);
     }
     for (const spine of topology.spines) {
+      if (spine.label === 'SUPER') continue;
       ctx.font = "500 8px 'JetBrains Mono', monospace";
       ctx.fillStyle = 'rgba(128, 222, 234, 0.5)';
       ctx.textAlign = 'center';
