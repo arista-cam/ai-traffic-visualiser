@@ -1002,16 +1002,23 @@ function buildTopology(count, overrideSpineCount) {
     }
   }
 
-  // Super-spines (3-tier only — shared across planes)
+  // Super-spines (3-tier only — one set per plane, independent)
   if (is3Tier) {
-    const ssW = isMultiPlane ? w - sidePad * 2 : w - sidePad * 2;
-    for (let i = 0; i < superSpineCount; i++) {
-      const x = sidePad + ssW * (i + 0.5) / superSpineCount;
-      superSpines.push({ id: `sspine-${i}`, type: 'spine', x, y: superSpineTierY, label: 'SUPER', plane: -1 });
-    }
-    for (const ss of superSpines) {
-      for (const sp of allSpines) {
-        superSpineLinks.push({ from: ss, to: sp, type: 'super-spine' });
+    for (let p = 0; p < planes; p++) {
+      const planeW = isMultiPlane ? w * 0.5 - sidePad : w - sidePad * 2;
+      const planeLeft = isMultiPlane ? (p === 0 ? sidePad : w * 0.5 + sidePad * 0.5) : sidePad;
+      const pfx = isMultiPlane ? `p${p}-` : '';
+      for (let i = 0; i < superSpineCount; i++) {
+        const x = planeLeft + planeW * (i + 0.5) / superSpineCount;
+        superSpines.push({ id: `${pfx}sspine-${i}`, type: 'spine', x, y: superSpineTierY, label: 'SUPER', plane: p });
+      }
+      // Connect only to spines in the same plane
+      for (const ss of superSpines) {
+        if (ss.plane !== p) continue;
+        for (const sp of allSpines) {
+          if (sp.plane !== p) continue;
+          superSpineLinks.push({ from: ss, to: sp, type: 'super-spine' });
+        }
       }
     }
   }
