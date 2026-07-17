@@ -1051,7 +1051,7 @@ function buildTopology(count, overrideSpineCount) {
     const ssW = isMultiPlane ? w - sidePad * 2 : w - sidePad * 2;
     for (let i = 0; i < superSpineCount; i++) {
       const x = sidePad + ssW * (i + 0.5) / superSpineCount;
-      superSpines.push({ id: `sspine-${i}`, type: 'spine', x, y: superSpineTierY, label: 'S-SPINE', plane: -1 });
+      superSpines.push({ id: `sspine-${i}`, type: 'spine', x, y: superSpineTierY, label: 'SUPER', plane: -1 });
     }
     for (const ss of superSpines) {
       for (const sp of allSpines) {
@@ -2183,7 +2183,8 @@ function drawSwitchNode(node, radius, color, label) {
   const drawColor = isFailed ? CONFIG.colors.failed : color;
 
   const spriteSize = (radius + 16) * 2;
-  const key = `sw-${radius}-${drawColor}-${isFailed ? 1 : 0}`;
+  const displayLabel = isFailed ? 'DOWN' : label;
+  const key = `sw-${radius}-${drawColor}-${isFailed ? 1 : 0}-${displayLabel}`;
 
   const sprite = getOrCreateSprite(key, spriteSize, spriteSize, (c, cx, cy) => {
     drawSwitchNodeDirect(c, cx, cy, radius, drawColor, isFailed ? 'FAIL' : label, isFailed);
