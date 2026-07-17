@@ -1084,6 +1084,20 @@ function initParticles() {
     }
   }
 
+  // Super-spine links (3-tier inter-pod traffic — light baseline)
+  if (topology.superSpines && topology.superSpines.length > 0) {
+    for (const link of topology.spineLeafLinks) {
+      if (link.type !== 'super-spine') continue;
+      if (isLinkFailed(link)) continue;
+      if (Math.random() < (isTraining ? 0.4 : 0.15) * scale) {
+        const p = createParticle(link);
+        p.color = '#80deea';
+        p.size = 1.8;
+        particles.push(p);
+      }
+    }
+  }
+
   // Leaf-GPU (vertical traffic to/from GPUs)
   for (const link of topology.leafGpuLinks) {
     if (isLinkFailed(link)) continue;
@@ -1773,6 +1787,18 @@ function floodSpineParticles() {
       particles.push(p);
     }
   }
+  // Flood super-spine links too during all-reduce (inter-pod traffic)
+  for (const link of topology.spineLeafLinks) {
+    if (link.type !== 'super-spine') continue;
+    if (isLinkFailed(link)) continue;
+    for (let i = 0; i < Math.max(2, Math.floor(perLink / 3)); i++) {
+      const p = createParticle(link);
+      p.color = '#80deea';
+      p.size = 2.4;
+      p.speed = Math.sign(p.speed) * (CONFIG.particleSpeed.max * (1.0 + Math.random() * 0.6));
+      particles.push(p);
+    }
+  }
 }
 
 function drainSpineParticles() {
@@ -2304,6 +2330,11 @@ function drawTierLabels() {
   const cx = canvas.width / dpr / 2;
   if (topology.superSpineCount > 0) {
     ctx.fillText('SUPER-SPINE TIER', cx, topology.tierYs.superSpine - 20);
+    ctx.font = "400 9px 'Inter', sans-serif";
+    ctx.fillStyle = 'rgba(100, 180, 255, 0.18)';
+    ctx.fillText('Inter-pod traffic · Needed at 1,000+ GPUs', cx, topology.tierYs.superSpine - 8);
+    ctx.font = "600 11px 'JetBrains Mono', monospace";
+    ctx.fillStyle = 'rgba(100, 180, 255, 0.12)';
   }
   ctx.fillText('SPINE TIER', cx, topology.tierYs.spine - (topology.superSpineCount > 0 ? 20 : 30));
   ctx.fillText('LEAF TIER', cx, topology.tierYs.leaf - 22);
