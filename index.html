@@ -1113,6 +1113,7 @@ function initParticles() {
 
   // Spine-leaf (east-west fabric traffic)
   for (const link of topology.spineLeafLinks) {
+    if (link.type === 'super-spine') continue;
     if (isLinkFailed(link)) continue;
     const count = Math.max(1, Math.round((isTraining ? 5 : 1) * scale));
     for (let i = 0; i < count; i++) {
@@ -1581,8 +1582,6 @@ function forcePhase(key) {
     statPhase.style.color = '#e040fb';
 
   } else if (key === 'tech-radix') {
-    // Rebuild with 1:1 oversubscription (spine count = GPUs per leaf)
-    topology = buildTopology(gpuCount, CONFIG.gpusPerLeaf);
     setTrainingBase();
     trainingPhase = 'compute';
     for (const gpu of topology.gpus) {
@@ -1590,11 +1589,8 @@ function forcePhase(key) {
       gpu.util = 70 + Math.random() * 30;
     }
     initParticles();
-    computeEcmpFlows();
-    document.getElementById('bar-leaves').textContent = topology.leafCount;
-    document.getElementById('bar-spines').textContent = topology.spineCount;
     const gpusPerLeaf = Math.round(gpuCount / topology.leafCount);
-    statusText.textContent = `RADIX-${gpusPerLeaf + topology.spineCount} · 1:1 NON-BLOCKING`;
+    statusText.textContent = `RADIX-${gpusPerLeaf + topology.spineCount} TOPOLOGY`;
     statPhase.textContent = 'RADIX';
     statPhase.style.color = '#80deea';
   }
@@ -1798,6 +1794,7 @@ function floodSpineParticles() {
   if (!topology) return;
   const perLink = gpuCount <= 128 ? 10 : gpuCount <= 256 ? 5 : 3;
   for (const link of topology.spineLeafLinks) {
+    if (link.type === 'super-spine') continue;
     if (isLinkFailed(link)) continue;
     for (let i = 0; i < perLink; i++) {
       const p = createParticle(link);
@@ -2236,7 +2233,7 @@ function drawNodes() {
 
   for (const s of topology.spines) {
     const r = gpuCount > 256 ? 22 : 28;
-    drawSwitchNode(s, r, CONFIG.colors.spine, 'SPINE');
+    drawSwitchNode(s, r, CONFIG.colors.spine, s.label);
   }
 
   for (const l of topology.leaves) {
@@ -2537,6 +2534,7 @@ function updateCongestion(dt) {
     const chance = (workloadMode === 'training' && trainingPhase === 'allreduce') ? 0.15 : 0.03;
     for (let i = 0; i < topology.spineLeafLinks.length; i++) {
       const link = topology.spineLeafLinks[i];
+      if (link.type === 'super-spine') continue;
       if (isLinkFailed(link)) continue;
       if (Math.random() < chance) {
         congestionEvents.push({
@@ -3027,6 +3025,15 @@ function animate(time) {
   drawPathTrace();
   drawParticles();
   drawNodes();
+
+  // Dim the base fabric when a tech scenario is active
+  if (activeScenario) {
+    ctx.fillStyle = 'rgba(10, 14, 23, 0.55)';
+    ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    // Redraw nodes on top so they're still visible but subdued
+    drawNodes();
+  }
+
   drawScenarioOverlay();
   drawTierLabels();
   drawLeafTooltip();
